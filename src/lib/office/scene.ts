@@ -16,6 +16,7 @@
  * written back to the DB, so a reload puts everyone back where they were.
  */
 import * as THREE from 'three'
+import { ENV, FOG, RENDER, SKY } from './palette'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { CSS2DRenderer, CSS2DObject } from 'three/examples/jsm/renderers/CSS2DRenderer.js'
 
@@ -187,7 +188,7 @@ function selectiveShadow(root: THREE.Object3D, light: THREE.DirectionalLight) {
   light.shadow.normalBias = 0.02
 }
 
-function skyGradientTexture(stops = ['#9dc4e8', '#c6dcef', '#e2edf6', '#eef4f8']): THREE.Texture {
+function skyGradientTexture(stops: readonly string[] = SKY.day): THREE.Texture {
   const c = document.createElement('canvas')
   c.width = 2
   c.height = 256
@@ -211,11 +212,7 @@ function envContrastTexture(): THREE.Texture {
   c.height = 256
   const g = c.getContext('2d')!
   const grad = g.createLinearGradient(0, 0, 0, 256)
-  grad.addColorStop(0, '#dfefff')
-  grad.addColorStop(0.42, '#bcd6ea')
-  grad.addColorStop(0.5, '#f4e6cf')
-  grad.addColorStop(0.62, '#6a6152')
-  grad.addColorStop(1, '#241f1a')
+  for (const [at, col] of ENV.stops) grad.addColorStop(at, col)
   g.fillStyle = grad
   g.fillRect(0, 0, 512, 256)
   const panels: [number, number, number, number][] = [
@@ -227,9 +224,9 @@ function envContrastTexture(): THREE.Texture {
   ]
   for (const [x, y, w, h] of panels) {
     const rg = g.createRadialGradient(x + w / 2, y + h / 2, 1, x + w / 2, y + h / 2, Math.max(w, h))
-    rg.addColorStop(0, '#ffffff')
-    rg.addColorStop(0.5, 'rgba(255,246,224,0.85)')
-    rg.addColorStop(1, 'rgba(255,246,224,0)')
+    rg.addColorStop(0, ENV.panelCore)
+    rg.addColorStop(0.5, ENV.panelMid)
+    rg.addColorStop(1, ENV.panelEdge)
     g.fillStyle = rg
     g.fillRect(x - w, y - h, w * 3, h * 3)
   }
@@ -249,7 +246,7 @@ export function createScene(
   renderer.shadowMap.enabled = true
   renderer.shadowMap.type = THREE.PCFSoftShadowMap
   renderer.toneMapping = THREE.ACESFilmicToneMapping
-  renderer.toneMappingExposure = 1.1
+  renderer.toneMappingExposure = RENDER.exposure
   renderer.outputColorSpace = THREE.SRGBColorSpace
 
   const pmrem = new THREE.PMREMGenerator(renderer)
@@ -266,7 +263,7 @@ export function createScene(
   scene.environmentIntensity = 1.0
   pmrem.dispose()
   scene.background = skyGradientTexture()
-  scene.fog = new THREE.Fog(0xd3e2ef, 80, 220)
+  scene.fog = new THREE.Fog(FOG.day, FOG.near, FOG.far)
 
   let hour = Number(
     new Intl.DateTimeFormat('en-GB', { hour: '2-digit', hour12: false, timeZone: 'Asia/Jakarta' })
@@ -1310,12 +1307,12 @@ export function createScene(
   }
 
   const skyDay = skyGradientTexture()
-  const skyNight = skyGradientTexture(['#20344d', '#31465f', '#4a6076', '#63798c'])
+  const skyNight = skyGradientTexture(SKY.night)
   function setHour(h: number) {
     hour = h
     office.applyPalette(h)
     scene.background = h >= 18 || h < 6 ? skyNight : skyDay
-    scene.fog = new THREE.Fog(h >= 18 || h < 6 ? 0x54697d : 0xd3e2ef, 80, 220)
+    scene.fog = new THREE.Fog(h >= 18 || h < 6 ? FOG.night : FOG.day, FOG.near, FOG.far)
   }
   setHour(hour)
 

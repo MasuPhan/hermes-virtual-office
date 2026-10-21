@@ -90,6 +90,7 @@ import {
   type Palette,
 } from './layout'
 import { HEALTH_COLOR, type Health } from './health'
+import { GLOW, LIGHTS, pal, palCss } from './palette'
 
 /* ------------------------------------------------------------- primitives -- */
 
@@ -188,7 +189,7 @@ function asphaltTexture(base: string, grit: string) {
     c.fillRect(0, 0, s, s)
     for (let i = 0; i < 4200; i++) {
       c.globalAlpha = 0.05 + rand() * 0.16
-      c.fillStyle = rand() > 0.35 ? grit : '#2b2e31'
+      c.fillStyle = rand() > 0.35 ? grit : palCss('#2b2e31')
       const r = 0.6 + rand() * 1.9
       c.beginPath()
       c.arc(rand() * s, rand() * s, r, 0, Math.PI * 2)
@@ -250,7 +251,7 @@ function laneTexture() {
       // grain, running the length of the board
       for (let g = 0; g < 7; g++) {
         c.globalAlpha = 0.05 + rand() * 0.07
-        c.strokeStyle = rand() > 0.5 ? '#8a6a3c' : '#e8cfa4'
+        c.strokeStyle = rand() > 0.5 ? palCss('#8a6a3c') : palCss('#e8cfa4')
         c.lineWidth = 1
         const y = i * h + rand() * h
         c.beginPath()
@@ -292,12 +293,12 @@ function signTexture(text: string, sub?: string) {
   cv.width = 512
   cv.height = 128
   const c = cv.getContext('2d')!
-  c.fillStyle = '#2a1f16'
+  c.fillStyle = palCss('#2a1f16')
   c.fillRect(0, 0, 512, 128)
-  c.strokeStyle = '#c9a24a'
+  c.strokeStyle = palCss('#c9a24a')
   c.lineWidth = 6
   c.strokeRect(8, 8, 496, 112)
-  c.fillStyle = '#e8cf8a'
+  c.fillStyle = palCss('#e8cf8a')
   c.textAlign = 'center'
   c.textBaseline = 'middle'
   // FIT THE TEXT TO THE PLATE. At a fixed 54 px, "DEVELOPER & INFRASTRUCTURE" ran off both
@@ -310,7 +311,7 @@ function signTexture(text: string, sub?: string) {
   }
   c.fillText(text, 256, sub ? 50 : 64)
   if (sub) {
-    c.fillStyle = '#a89a72'
+    c.fillStyle = palCss('#a89a72')
     c.font = '26px Georgia, serif'
     c.fillText(sub, 256, 94)
   }
@@ -338,12 +339,12 @@ function racingFeedTexture() {
 
   // sky / dusk glow above the horizon
   const sky = c.createLinearGradient(0, 0, 0, HORIZON)
-  sky.addColorStop(0, '#0d1b3a')
-  sky.addColorStop(1, '#5b4a86')
+  sky.addColorStop(0, palCss('#0d1b3a'))
+  sky.addColorStop(1, palCss('#5b4a86'))
   c.fillStyle = sky
   c.fillRect(0, 0, 512, HORIZON)
   // ground either side of the road
-  c.fillStyle = '#2b3a2a'
+  c.fillStyle = palCss('#2b3a2a')
   c.fillRect(0, HORIZON, 512, 288 - HORIZON)
 
   // the road: a trapezoid from a narrow vanishing point to past the frame at the bottom
@@ -353,16 +354,16 @@ function racingFeedTexture() {
   c.lineTo(572, 288)
   c.lineTo(-60, 288)
   c.closePath()
-  c.fillStyle = '#3b4046'
+  c.fillStyle = palCss('#3b4046')
   c.fill()
 
   // barriers hugging both edges
-  c.fillStyle = '#c8402f'
+  c.fillStyle = palCss('#c8402f')
   c.beginPath(); c.moveTo(234, HORIZON); c.lineTo(252, HORIZON); c.lineTo(-88, 288); c.lineTo(-118, 288); c.closePath(); c.fill()
   c.beginPath(); c.moveTo(278, HORIZON); c.lineTo(296, HORIZON); c.lineTo(600, 288); c.lineTo(630, 288); c.closePath(); c.fill()
 
   // lane dashes: they widen as they come forward, which is what sells the depth
-  c.fillStyle = '#e8e2c8'
+  c.fillStyle = palCss('#e8e2c8')
   for (let i = 0; i < 7; i++) {
     const t0 = i / 7
     const t1 = t0 + 0.06
@@ -378,13 +379,13 @@ function racingFeedTexture() {
   c.textBaseline = 'middle'
   c.font = 'bold 30px ui-monospace, monospace'
   c.textAlign = 'left'
-  c.fillStyle = '#7ef0a8'
+  c.fillStyle = palCss('#7ef0a8')
   c.fillText('VÒNG 3/5', 18, 288 - 24)
   c.textAlign = 'right'
-  c.fillStyle = '#ffd45e'
+  c.fillStyle = palCss('#ffd45e')
   c.fillText('248 KM/H', 494, 288 - 24)
   // a rev strip, so the HUD is not just two numbers
-  c.fillStyle = '#39d3ff'
+  c.fillStyle = palCss('#39d3ff')
   c.fillRect(150, 288 - 21, 212, 9)
 
   const tex = new THREE.CanvasTexture(cv)
@@ -401,12 +402,12 @@ function whiteboardTexture() {
   // A chalkboard green that still reads as GREEN from across the courtyard. The
   // first pass used #2f6b4f, which the tone mapping crushed to near-black.
   const grad = c.createLinearGradient(0, 0, 0, 512)
-  grad.addColorStop(0, '#4f9c6f')
-  grad.addColorStop(1, '#3d8058')
+  grad.addColorStop(0, palCss('#4f9c6f'))
+  grad.addColorStop(1, palCss('#3d8058'))
   c.fillStyle = grad
   c.fillRect(0, 0, 1024, 512)
   // chalk column headings, evenly spaced
-  c.fillStyle = '#f2fff0'
+  c.fillStyle = palCss('#f2fff0')
   c.font = 'bold 44px ui-monospace, monospace'
   c.textAlign = 'center'
   c.textBaseline = 'top'
@@ -493,11 +494,11 @@ export function buildOffice(scene: THREE.Scene, hour: number) {
    */
   let tvScreen: THREE.Mesh | null = null
   /** The TV's standby look, captured when the mesh is built so `setTvRacing` can restore it. */
-  let tvIdleEmissive = 0x2a4a5a
+  let tvIdleEmissive = pal(0x2a4a5a)
   let tvIdleIntensity = 0.6
   /** The bar and plates resting in the rack's hooks, hidden while somebody benches. */
   const rackBarParts: THREE.Mesh[] = []
-  let pal: Palette = paletteFor(hour)
+  let roomPal: Palette = paletteFor(hour)
   const disposables: { dispose(): void }[] = []
   const track = <T extends { dispose(): void }>(t: T): T => {
     disposables.push(t)
@@ -519,12 +520,12 @@ export function buildOffice(scene: THREE.Scene, hour: number) {
       roughness: 0.8,
       // A touch of self-illumination so the board keeps its green under the
       // interior lights instead of falling to near-black in shadow.
-      emissive: 0x2a5c3e,
+      emissive: pal(0x2a5c3e),
       emissiveIntensity: 0.35,
     }),
   )
   const grassMat = track(
-    new THREE.MeshStandardMaterial({ map: grassTexture('#4f7a45', '#6da05c'), roughness: 1 }),
+    new THREE.MeshStandardMaterial({ map: grassTexture(palCss('#4f7a45'), palCss('#6da05c')), roughness: 1 }),
   )
 
   const monitors: THREE.Mesh[] = []
@@ -556,7 +557,7 @@ export function buildOffice(scene: THREE.Scene, hour: number) {
     // Paved deck, drawn as FOUR slabs AROUND the pool so the basin is a real hole
     // in the paving. One slab across the whole courtyard buried the water under
     // the deck: the pool existed but was invisible.
-    const deckMat = track(new THREE.MeshStandardMaterial({ color: 0xcfc7b4, roughness: 0.9 }))
+    const deckMat = track(new THREE.MeshStandardMaterial({ color: pal(0xcfc7b4), roughness: 0.9 }))
     const px1 = POOL.x - POOL.w / 2 - 0.4
     const px2 = POOL.x + POOL.w / 2 + 0.4
     const pz1 = POOL.z - POOL.d / 2 - 0.4
@@ -604,7 +605,7 @@ export function buildOffice(scene: THREE.Scene, hour: number) {
       new THREE.PlaneGeometry(w - t * 2, d - t * 2),
       track(
         new THREE.MeshPhysicalMaterial({
-          color: 0x2f8fb5,
+          color: pal(0x2f8fb5),
           roughness: 0.06,
           metalness: 0.1,
           transmission: 0.55,
@@ -624,13 +625,13 @@ export function buildOffice(scene: THREE.Scene, hour: number) {
       [x - w / 2 - 0.18, z, 0.36, d],
       [x + w / 2 + 0.18, z, 0.36, d],
     ] as const) {
-      const m = box(sw, 0.09, sd, 0xd8d2c2, { rough: 0.7 })
+      const m = box(sw, 0.09, sd, pal(0xd8d2c2), { rough: 0.7 })
       m.position.set(sx, 0.045, sz)
       group.add(m)
     }
     // pool ladder at the east end
     for (const lz of [z - 0.5, z + 0.5]) {
-      const rail = cyl(0.035, 0.035, 1.1, 0xcfd6da, 10, 0.9)
+      const rail = cyl(0.035, 0.035, 1.1, pal(0xcfd6da), 10, 0.9)
       rail.position.set(x + w / 2 - 0.2, 0.35, lz)
       rail.rotation.z = 0.18
       group.add(rail)
@@ -649,7 +650,7 @@ export function buildOffice(scene: THREE.Scene, hour: number) {
     const d = GYM.z2 - GYM.z1
     const mat = new THREE.Mesh(
       new THREE.PlaneGeometry(w, d),
-      stdMat(0x3d6b4b, { rough: 0.98 }),
+      stdMat(pal(0x3d6b4b), { rough: 0.98 }),
     )
     mat.rotation.x = -Math.PI / 2
     mat.position.set((GYM.x1 + GYM.x2) / 2, 0.035, (GYM.z1 + GYM.z2) / 2)
@@ -662,7 +663,7 @@ export function buildOffice(scene: THREE.Scene, hour: number) {
       [(GYM.x1 + GYM.x2) / 2, GYM.z1, w, 0.12],
       [(GYM.x1 + GYM.x2) / 2, GYM.z2, w, 0.12],
     ] as const) {
-      const edge = new THREE.Mesh(new THREE.PlaneGeometry(bw, bd), stdMat(0xd8d2c4, { rough: 0.9 }))
+      const edge = new THREE.Mesh(new THREE.PlaneGeometry(bw, bd), stdMat(pal(0xd8d2c4), { rough: 0.9 }))
       edge.rotation.x = -Math.PI / 2
       edge.position.set(bx, 0.04, bz)
       group.add(edge)
@@ -674,17 +675,17 @@ export function buildOffice(scene: THREE.Scene, hour: number) {
       g.position.set(GYM.rack.x, 0, GYM.rack.z)
       // two uprights
       for (const ux of [-0.55, 0.55]) {
-        const post = box(0.11, 1.35, 0.11, 0x2f3438, { metal: 0.7 })
+        const post = box(0.11, 1.35, 0.11, pal(0x2f3438), { metal: 0.7 })
         post.position.set(ux, 0.675, 0)
         post.castShadow = true
         g.add(post)
         // feet
-        const foot = box(0.14, 0.09, 0.9, 0x2f3438, { metal: 0.7 })
+        const foot = box(0.14, 0.09, 0.9, pal(0x2f3438), { metal: 0.7 })
         foot.position.set(ux, 0.045, 0)
         g.add(foot)
       }
       // the bar, resting in the hooks
-      const bar = cyl(0.035, 0.035, 2.2, 0xb9c0c6, 12, 0.85)
+      const bar = cyl(0.035, 0.035, 2.2, pal(0xb9c0c6), 12, 0.85)
       bar.rotation.z = Math.PI / 2
       bar.position.set(0, GYM.rack.barY, 0)
       g.add(bar)
@@ -699,7 +700,7 @@ export function buildOffice(scene: THREE.Scene, hour: number) {
           [0.88, 0.19],
           [0.97, 0.15],
         ] as const) {
-          const plate = cyl(r, r, 0.07, 0x24282c, 18, 0.55)
+          const plate = cyl(r, r, 0.07, pal(0x24282c), 18, 0.55)
           plate.rotation.z = Math.PI / 2
           plate.position.set(side * off, GYM.rack.barY, 0)
           g.add(plate)
@@ -707,11 +708,11 @@ export function buildOffice(scene: THREE.Scene, hour: number) {
         }
       }
       // a bench under the bar
-      const pad = new THREE.Mesh(rbox(0.36, 0.12, 1.25, 0.03), stdMat(0x1f2427, { rough: 0.85 }))
+      const pad = new THREE.Mesh(rbox(0.36, 0.12, 1.25, 0.03), stdMat(pal(0x1f2427), { rough: 0.85 }))
       pad.position.set(0, 0.46, 0.05)
       g.add(pad)
       for (const pz of [-0.42, 0.52]) {
-        const leg = box(0.3, 0.4, 0.1, 0x2f3438, { metal: 0.7 })
+        const leg = box(0.3, 0.4, 0.1, pal(0x2f3438), { metal: 0.7 })
         leg.position.set(0, 0.2, pz)
         g.add(leg)
       }
@@ -727,14 +728,14 @@ export function buildOffice(scene: THREE.Scene, hour: number) {
         [0.42, 0.16],
         [0.72, -0.16],
       ] as const) {
-        const shelf = box(1.9, 0.06, 0.3, 0x2f3438, { metal: 0.7 })
+        const shelf = box(1.9, 0.06, 0.3, pal(0x2f3438), { metal: 0.7 })
         shelf.position.set(0, ty, tz)
         shelf.castShadow = true
         g.add(shelf)
       }
       for (const sx of [-0.88, 0, 0.88]) {
         for (const sgn of [-1, 1]) {
-          const leg = box(0.07, 0.78, 0.07, 0x2f3438, { metal: 0.7 })
+          const leg = box(0.07, 0.78, 0.07, pal(0x2f3438), { metal: 0.7 })
           leg.position.set(sx, 0.39, sgn * 0.14)
           leg.rotation.x = sgn * 0.2
           g.add(leg)
@@ -746,12 +747,12 @@ export function buildOffice(scene: THREE.Scene, hour: number) {
         const tier = i < 3 ? 0.45 : 0.75
         const z = i < 3 ? 0.16 : -0.16
         const r = 0.1 + (i % 3) * 0.022
-        const handle = cyl(0.022, 0.022, 0.2, 0x9aa2a8, 8, 0.85)
+        const handle = cyl(0.022, 0.022, 0.2, pal(0x9aa2a8), 8, 0.85)
         handle.rotation.z = Math.PI / 2
         handle.position.set(x, tier + 0.11, z)
         g.add(handle)
         for (const hx of [-0.09, 0.09]) {
-          const head = cyl(r, r, 0.09, 0x24282c, 14, 0.55)
+          const head = cyl(r, r, 0.09, pal(0x24282c), 14, 0.55)
           head.rotation.z = Math.PI / 2
           head.position.set(x + hx, tier + 0.11, z)
           g.add(head)
@@ -766,16 +767,16 @@ export function buildOffice(scene: THREE.Scene, hour: number) {
       g.position.set(GYM.rig.x, 0, GYM.rig.z)
       const H = 2.45
       for (const px of [-GYM.rig.span / 2, GYM.rig.span / 2]) {
-        const post = box(0.12, H, 0.12, 0x2f3438, { metal: 0.7 })
+        const post = box(0.12, H, 0.12, pal(0x2f3438), { metal: 0.7 })
         post.position.set(px, H / 2, 0)
         post.castShadow = true
         g.add(post)
-        const foot = box(0.18, 0.1, 1.0, 0x2f3438, { metal: 0.7 })
+        const foot = box(0.18, 0.1, 1.0, pal(0x2f3438), { metal: 0.7 })
         foot.position.set(px, 0.05, 0)
         g.add(foot)
       }
       // the bar you hang from
-      const bar = cyl(0.032, 0.032, GYM.rig.span + 0.12, 0xb9c0c6, 12, 0.85)
+      const bar = cyl(0.032, 0.032, GYM.rig.span + 0.12, pal(0xb9c0c6), 12, 0.85)
       bar.rotation.z = Math.PI / 2
       bar.position.set(0, GYM.rig.barY, 0)
       g.add(bar)
@@ -789,10 +790,10 @@ export function buildOffice(scene: THREE.Scene, hour: number) {
       // as a rig on their own.
       // two hanging grips
       for (const gx of [-0.5, 0.5]) {
-        const strap = box(0.05, 0.42, 0.05, 0x3a4045, { rough: 0.9 })
+        const strap = box(0.05, 0.42, 0.05, pal(0x3a4045), { rough: 0.9 })
         strap.position.set(gx, H - 0.27, 0)
         g.add(strap)
-        const ring = new THREE.Mesh(new THREE.TorusGeometry(0.11, 0.025, 8, 16), stdMat(0x9aa2a8, { metal: 0.8 }))
+        const ring = new THREE.Mesh(new THREE.TorusGeometry(0.11, 0.025, 8, 16), stdMat(pal(0x9aa2a8), { metal: 0.8 }))
         ring.position.set(gx, H - 0.52, 0)
         g.add(ring)
       }
@@ -813,7 +814,7 @@ export function buildOffice(scene: THREE.Scene, hour: number) {
     kerb.castShadow = true
     kerb.receiveShadow = true
     g.add(kerb)
-    const soil = new THREE.Mesh(new THREE.BoxGeometry(w - 0.16, 0.06, d - 0.16), stdMat(0x3b2f23))
+    const soil = new THREE.Mesh(new THREE.BoxGeometry(w - 0.16, 0.06, d - 0.16), stdMat(pal(0x3b2f23)))
     soil.position.set(cx, 0.36, cz)
     g.add(soil)
     // shrubs + a couple of small trees, seeded so the layout is stable
@@ -826,7 +827,7 @@ export function buildOffice(scene: THREE.Scene, hour: number) {
       const h = big ? 0.95 : 0.5
       const bush = new THREE.Mesh(
         new THREE.IcosahedronGeometry(big ? 0.42 : 0.28, 0),
-        stdMat(big ? 0x4f8b55 : 0x6da05c, { rough: 0.9 }),
+        stdMat(big ? pal(0x4f8b55) : pal(0x6da05c), { rough: 0.9 }),
       )
       bush.position.set(px, 0.4 + h / 2, pz)
       bush.scale.set(1, big ? 1.15 : 0.85, 1)
@@ -847,11 +848,11 @@ export function buildOffice(scene: THREE.Scene, hour: number) {
     frame.castShadow = true
     frame.receiveShadow = true
     g.add(frame)
-    const mattress = new THREE.Mesh(rbox(0.9, 0.14, 1.95, 0.05), stdMat(0xe8e2d2, { rough: 0.95 }))
+    const mattress = new THREE.Mesh(rbox(0.9, 0.14, 1.95, 0.05), stdMat(pal(0xe8e2d2), { rough: 0.95 }))
     mattress.position.y = 0.49
     g.add(mattress)
     // head rest at the -z end, tilted up
-    const head = new THREE.Mesh(rbox(0.9, 0.1, 0.62, 0.04), stdMat(0xe8e2d2, { rough: 0.95 }))
+    const head = new THREE.Mesh(rbox(0.9, 0.1, 0.62, 0.04), stdMat(pal(0xe8e2d2), { rough: 0.95 }))
     head.position.set(0, 0.66, -0.72)
     head.rotation.x = 0.5
     head.castShadow = true
@@ -862,7 +863,7 @@ export function buildOffice(scene: THREE.Scene, hour: number) {
       [-0.4, 0.92],
       [0.4, 0.92],
     ] as const) {
-      const leg = box(0.09, 0.36, 0.09, 0x8a6a44, { rough: 0.8 })
+      const leg = box(0.09, 0.36, 0.09, pal(0x8a6a44), { rough: 0.8 })
       leg.position.set(lx, 0.18, lz)
       g.add(leg)
     }
@@ -890,7 +891,7 @@ export function buildOffice(scene: THREE.Scene, hour: number) {
       g.add(slat)
     }
     for (const lx of [-0.7, 0.7]) {
-      const leg = box(0.09, 0.42, 0.42, 0x8a6a44, { rough: 0.8 })
+      const leg = box(0.09, 0.42, 0.42, pal(0x8a6a44), { rough: 0.8 })
       leg.position.set(lx, 0.21, 0.02)
       g.add(leg)
     }
@@ -906,35 +907,35 @@ export function buildOffice(scene: THREE.Scene, hour: number) {
     base.position.y = 0.45
     base.castShadow = true
     g.add(base)
-    const top = box(2.1, 0.07, 1.25, 0x4a5054, { metal: 0.5, rough: 0.4 })
+    const top = box(2.1, 0.07, 1.25, pal(0x4a5054), { metal: 0.5, rough: 0.4 })
     top.position.y = 0.93
     g.add(top)
     // the grill, set into the counter
-    const grill = box(1.05, 0.18, 0.72, 0x2b2f33, { metal: 0.6 })
+    const grill = box(1.05, 0.18, 0.72, pal(0x2b2f33), { metal: 0.6 })
     grill.position.set(-0.35, 1.03, 0)
     g.add(grill)
     // hood
     const hood = new THREE.Mesh(
       new THREE.CylinderGeometry(0.35, 0.35, 1.05, 16, 1, false, 0, Math.PI),
-      stdMat(0x3a3f43, { metal: 0.6, rough: 0.35 }),
+      stdMat(pal(0x3a3f43), { metal: 0.6, rough: 0.35 }),
     )
     hood.rotation.z = Math.PI / 2
     hood.position.set(-0.35, 1.12, 0)
     g.add(hood)
     // a small prep shelf on the other end
-    const shelf = box(0.62, 0.05, 0.8, 0xb9b2a2, { rough: 0.8 })
+    const shelf = box(0.62, 0.05, 0.8, pal(0xb9b2a2), { rough: 0.8 })
     shelf.position.set(0.62, 0.98, 0)
     g.add(shelf)
     // side burner knob strip, so it reads as equipment
     for (let i = 0; i < 3; i++) {
-      const knob = cyl(0.045, 0.045, 0.05, 0x24282c, 10, 0.6)
+      const knob = cyl(0.045, 0.045, 0.05, pal(0x24282c), 10, 0.6)
       knob.rotation.x = Math.PI / 2
       knob.position.set(0.35 + i * 0.22, 0.72, 0.6)
       g.add(knob)
     }
     // The FIRE: an emissive bar under the grate, so the grill glows. Named, because the
     // scene pulses its emissive intensity rather than leaving it constant.
-    const fire = box(0.95, 0.05, 0.62, 0xff5a1e, { emissive: 0xff5a1e, ei: 1.4 })
+    const fire = box(0.95, 0.05, 0.62, pal(0xff5a1e), { emissive: pal(0xff5a1e), ei: 1.4 })
     fire.name = 'bbq-fire'
     fire.position.set(-0.35, 0.97, 0)
     g.add(fire)
@@ -949,7 +950,7 @@ export function buildOffice(scene: THREE.Scene, hour: number) {
       const puff = new THREE.Mesh(
         new THREE.SphereGeometry(0.3 + i * 0.09, 12, 10),
         new THREE.MeshBasicMaterial({
-          color: 0xe8edf1,
+          color: pal(0xe8edf1),
           transparent: true,
           opacity: 0.55 - i * 0.08,
           depthWrite: false,
@@ -961,7 +962,7 @@ export function buildOffice(scene: THREE.Scene, hour: number) {
       bbqSmoke.push(puff)
     }
     // A dim ember glow so the fire lights the counter around it.
-    const glow = new THREE.PointLight(0xff7a2e, 0.5, 3.2, 2)
+    const glow = new THREE.PointLight(LIGHTS.bbq.color, LIGHTS.bbq.intensity, 3.2, 2)
     glow.name = 'bbq-glow'
     glow.position.set(-0.35, 1.05, 0)
     g.add(glow)
@@ -977,14 +978,14 @@ export function buildOffice(scene: THREE.Scene, hour: number) {
     box0.position.y = 0.21
     box0.castShadow = true
     g.add(box0)
-    const soil = new THREE.Mesh(new THREE.BoxGeometry(bed.w - 0.14, 0.06, bed.d - 0.14), stdMat(0x3b2f23))
+    const soil = new THREE.Mesh(new THREE.BoxGeometry(bed.w - 0.14, 0.06, bed.d - 0.14), stdMat(pal(0x3b2f23)))
     soil.position.y = 0.44
     g.add(soil)
     const rand = rng(41)
     for (let i = 0; i < 12; i++) {
       const bush = new THREE.Mesh(
         new THREE.IcosahedronGeometry(0.16 + rand() * 0.12, 0),
-        stdMat(rand() > 0.5 ? 0x4f8b55 : 0x6da05c, { rough: 0.9 }),
+        stdMat(rand() > 0.5 ? pal(0x4f8b55) : pal(0x6da05c), { rough: 0.9 }),
       )
       bush.position.set((rand() - 0.5) * (bed.w - 0.5), 0.56 + rand() * 0.08, (rand() - 0.5) * (bed.d - 0.5))
       g.add(bush)
@@ -1005,10 +1006,10 @@ export function buildOffice(scene: THREE.Scene, hour: number) {
     top.position.y = 0.74
     top.castShadow = true
     g.add(top)
-    const stem = cyl(0.07, 0.09, 0.72, 0x6f5334, 10, 0.2)
+    const stem = cyl(0.07, 0.09, 0.72, pal(0x6f5334), 10, 0.2)
     stem.position.y = 0.37
     g.add(stem)
-    const foot = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.38, 0.05, 16), stdMat(0x5c4429, { rough: 0.7 }))
+    const foot = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.38, 0.05, 16), stdMat(pal(0x5c4429), { rough: 0.7 }))
     foot.position.y = 0.025
     g.add(foot)
     group.add(g)
@@ -1033,7 +1034,7 @@ export function buildOffice(scene: THREE.Scene, hour: number) {
         [-0.18, 0.18],
         [0.18, 0.18],
       ] as const) {
-        const leg = box(0.05, 0.46, 0.05, 0x6f5334, { rough: 0.7 })
+        const leg = box(0.05, 0.46, 0.05, pal(0x6f5334), { rough: 0.7 })
         leg.position.set(lx, 0.23, lz)
         cg.add(leg)
       }
@@ -1094,7 +1095,7 @@ export function buildOffice(scene: THREE.Scene, hour: number) {
   shell(DOOR.x + 2.2, HALF_D, 14, HALF_D)
   // entrance transom (this one is full height: it is the doorway)
   {
-    const m = box(4.4, 0.5, WALL_T, 0xe8eef2, { rough: 0.6 })
+    const m = box(4.4, 0.5, WALL_T, pal(0xe8eef2), { rough: 0.6 })
     m.position.set(DOOR.x, 2.35, HALF_D)
     group.add(m)
   }
@@ -1155,7 +1156,7 @@ export function buildOffice(scene: THREE.Scene, hour: number) {
     ] as [number, number][]) {
       const w = x2 - x1
       if (w <= 0.05) continue
-      const f = box(w, 0.45, WALL_T, 0xdfe6ea, { rough: 0.85 })
+      const f = box(w, 0.45, WALL_T, pal(0xdfe6ea), { rough: 0.85 })
       f.position.set((x1 + x2) / 2, LEVEL_H - 0.22, n.z2)
       group.add(f)
     }
@@ -1209,12 +1210,12 @@ export function buildOffice(scene: THREE.Scene, hour: number) {
       const rail = new THREE.Mesh(new THREE.BoxGeometry(w, 1.0, 0.06), glassMat)
       rail.position.set(mid, LEVEL_H + 0.5, -9)
       group.add(rail)
-      const cap = box(w, 0.07, 0.12, 0x8a8f95, { metal: 0.6, rough: 0.35 })
+      const cap = box(w, 0.07, 0.12, pal(0x8a8f95), { metal: 0.6, rough: 0.35 })
       cap.position.set(mid, LEVEL_H + 1.0, -9)
       group.add(cap)
       // posts every 4 m, so it reads as a balustrade and not a floating pane
       for (let x = x1 + 1; x <= x2 - 1; x += 4) {
-        const post = cyl(0.04, 0.04, 1.0, 0x8a8f95, 8, 0.6)
+        const post = cyl(0.04, 0.04, 1.0, pal(0x8a8f95), 8, 0.6)
         post.position.set(x, LEVEL_H + 0.5, -9)
         group.add(post)
       }
@@ -1222,7 +1223,7 @@ export function buildOffice(scene: THREE.Scene, hour: number) {
     // A short return rail on each side of the mouth, so the gap reads as a real
     // opening with edges rather than a hole in the railing.
     for (const gx of [gap.x1, gap.x2]) {
-      const end = cyl(0.045, 0.045, 1.05, 0x8a8f95, 8, 0.6)
+      const end = cyl(0.045, 0.045, 1.05, pal(0x8a8f95), 8, 0.6)
       end.position.set(gx, LEVEL_H + 0.5, -9)
       group.add(end)
     }
@@ -1242,7 +1243,7 @@ export function buildOffice(scene: THREE.Scene, hour: number) {
   // door lintels over every exec-floor doorway
   for (const r of ROOMS.filter((x) => x.level === 1 && x.door)) {
     const d = r.door!
-    const lin = box(d.hw * 2, WALL_H - 2.15, WALL_T, 0xe8eef2, { rough: 0.7 })
+    const lin = box(d.hw * 2, WALL_H - 2.15, WALL_T, pal(0xe8eef2), { rough: 0.7 })
     lin.position.set(d.x, LEVEL_H + 2.15 + (WALL_H - 2.15) / 2, d.z)
     group.add(lin)
   }
@@ -1268,7 +1269,7 @@ export function buildOffice(scene: THREE.Scene, hour: number) {
     for (let i = 0; i < steps; i++) {
       const h = (LEVEL_H / steps) * (i + 1)
       const z = STAIRS.z2 - tread * (i + 0.5)
-      const step = box(w - 0.24, h, tread, 0xd8d2c4, { rough: 0.82 })
+      const step = box(w - 0.24, h, tread, pal(0xd8d2c4), { rough: 0.82 })
       step.position.set(cx, h / 2, z)
       step.castShadow = true
       step.receiveShadow = true
@@ -1284,7 +1285,7 @@ export function buildOffice(scene: THREE.Scene, hour: number) {
       // that left only 0.6 m of the 2.65 m corridor walkable — the reported
       // "handrail blocks the corridor" bug. The landing is the stair's arrival, so
       // it may occupy its own footprint and nothing beyond it.
-      const land = box(w - 0.24, 0.16, STAIRS.landing, 0xd8d2c4, { rough: 0.82 })
+      const land = box(w - 0.24, 0.16, STAIRS.landing, pal(0xd8d2c4), { rough: 0.82 })
       land.position.set(cx, LEVEL_H - 0.08, STAIRS.z1 + STAIRS.landing / 2)
       land.castShadow = true
       land.receiveShadow = true
@@ -1295,7 +1296,7 @@ export function buildOffice(scene: THREE.Scene, hour: number) {
       for (let i = 0; i < steps; i += 3) {
         const h = (LEVEL_H / steps) * (i + 1)
         const z = STAIRS.z2 - tread * (i + 0.5)
-        const leg = box(0.12, h, tread * 3, 0xb9b2a2, { rough: 0.9 })
+        const leg = box(0.12, h, tread * 3, pal(0xb9b2a2), { rough: 0.9 })
         leg.position.set(sx, h / 2, z)
         group.add(leg)
       }
@@ -1312,7 +1313,7 @@ export function buildOffice(scene: THREE.Scene, hour: number) {
     const pitch = Math.atan2(rise, flightRun)
     const railLen = Math.hypot(rise, flightRun)
     for (const rx of [STAIRS.x1 + 0.06, STAIRS.x2 - 0.06]) {
-      const rail = box(0.07, 0.07, railLen, 0x8a8f95, { metal: 0.6 })
+      const rail = box(0.07, 0.07, railLen, pal(0x8a8f95), { metal: 0.6 })
       rail.position.set(rx, LEVEL_H / 2 + 0.95, (STAIRS.z2 + STAIR_FLIGHT_TOP) / 2)
       rail.rotation.x = pitch
       group.add(rail)
@@ -1320,7 +1321,7 @@ export function buildOffice(scene: THREE.Scene, hour: number) {
         const f = i / 5
         const h = 0.95 + rise * f
         const z = STAIRS.z2 - flightRun * f
-        const post = cyl(0.035, 0.035, h, 0x8a8f95, 8, 0.6)
+        const post = cyl(0.035, 0.035, h, pal(0x8a8f95), 8, 0.6)
         post.position.set(rx, h / 2, z)
         group.add(post)
       }
@@ -1331,13 +1332,13 @@ export function buildOffice(scene: THREE.Scene, hour: number) {
       // the corridor and read as a railing planted in the walkway. A handrail
       // continues ~300 mm past the top riser so your hand has somewhere to go as you
       // step off; beyond that it is an obstruction.
-      const lrail = box(0.07, 0.07, STAIR_RAIL_EXTENSION, 0x8a8f95, { metal: 0.6 })
+      const lrail = box(0.07, 0.07, STAIR_RAIL_EXTENSION, pal(0x8a8f95), { metal: 0.6 })
       lrail.position.set(rx, LEVEL_H + 0.95, STAIR_FLIGHT_TOP - STAIR_RAIL_EXTENSION / 2)
       group.add(lrail)
       // a newel post at the end, so the rail terminates in something instead of
       // stopping in mid-air
       {
-        const post = cyl(0.045, 0.045, 1.0, 0x8a8f95, 8, 0.6)
+        const post = cyl(0.045, 0.045, 1.0, pal(0x8a8f95), 8, 0.6)
         post.position.set(rx, LEVEL_H + 0.5, STAIR_FLIGHT_TOP - STAIR_RAIL_EXTENSION)
         group.add(post)
       }
@@ -1358,7 +1359,7 @@ export function buildOffice(scene: THREE.Scene, hour: number) {
       // south edge (lobby side)
       [-9, c.z2 - off], [-3, c.z2 - off], [3, c.z2 - off], [9, c.z2 - off],
     ] as const) {
-      const post = cyl(0.1, 0.1, LEVEL_H, 0xe6e2d8, 10)
+      const post = cyl(0.1, 0.1, LEVEL_H, pal(0xe6e2d8), 10)
       post.position.set(x, LEVEL_H / 2, z)
       post.castShadow = true
       group.add(post)
@@ -1369,7 +1370,7 @@ export function buildOffice(scene: THREE.Scene, hour: number) {
       [c.x2 - off, 4, 3.2, c.z2 - c.z1],
       [0, c.z2 - off, c.x2 - c.x1, 3.2],
     ] as const) {
-      const roof = box(cw, 0.16, cd, 0xe8eef2, { rough: 0.85 })
+      const roof = box(cw, 0.16, cd, pal(0xe8eef2), { rough: 0.85 })
       roof.position.set(cx, LEVEL_H - 0.08, cz)
       roof.castShadow = true
       group.add(roof)
@@ -1389,7 +1390,7 @@ export function buildOffice(scene: THREE.Scene, hour: number) {
       [-HALF_W - 0.3, (n.z1 + n.z2) / 2, 0.6, n.z2 - n.z1 + 0.6],
       [HALF_W + 0.3, (n.z1 + n.z2) / 2, 0.6, n.z2 - n.z1 + 0.6],
     ] as const) {
-      const p = box(pw, 0.55, pd, 0x8f9aa0, { rough: 0.9 })
+      const p = box(pw, 0.55, pd, pal(0x8f9aa0), { rough: 0.9 })
       p.position.set(px, LEVEL_H * 2 + 0.35, pz)
       p.castShadow = true
       group.add(p)
@@ -1415,7 +1416,7 @@ export function buildOffice(scene: THREE.Scene, hour: number) {
       [bar.x1 + 0.15, cz, 0.3, d],
       [bar.x2 - 0.15, cz, 0.3, d],
     ] as const) {
-      const beam = box(bw, 0.34, bd, 0xf2f4f4, { rough: 0.95 })
+      const beam = box(bw, 0.34, bd, pal(0xf2f4f4), { rough: 0.95 })
       beam.position.set(bx, LEVEL_H - 0.17, bz)
       group.add(beam)
     }
@@ -1435,11 +1436,11 @@ export function buildOffice(scene: THREE.Scene, hour: number) {
     { x: 0, z: 18, w: 20, y: LEVEL_H - 0.35 },
   ]
   for (const p of panelRows) {
-    const panel = box(p.w, 0.05, 0.4, 0xffffff, { emissive: 0xfff4e0, ei: 1 })
+    const panel = box(p.w, 0.05, 0.4, GLOW.strip.color, { emissive: GLOW.strip.emissive, ei: GLOW.strip.ei })
     panel.position.set(p.x, p.y, p.z)
     group.add(panel)
     streaks.push(panel)
-    const l = new THREE.PointLight(0xfff6e6, 0.5, 22)
+    const l = new THREE.PointLight(LIGHTS.ceiling.color, LIGHTS.ceiling.intensity, 22)
     l.position.set(p.x, p.y - 0.4, p.z)
     group.add(l)
   }
@@ -1451,7 +1452,7 @@ export function buildOffice(scene: THREE.Scene, hour: number) {
     const nx = Math.sin(p.face)
     const nz = Math.cos(p.face)
     // the slab: its back sits ON the wall face, so it spans from the face outward by PLAQUE_T
-    const back = box(PLAQUE_W + 0.06, PLAQUE_H + 0.055, PLAQUE_T, 0x2a1f16, { rough: 0.7 })
+    const back = box(PLAQUE_W + 0.06, PLAQUE_H + 0.055, PLAQUE_T, pal(0x2a1f16), { rough: 0.7 })
     back.position.set(p.x, p.y, p.z)
     back.rotation.y = p.face
     group.add(back)
@@ -1478,7 +1479,7 @@ export function buildOffice(scene: THREE.Scene, hour: number) {
   // terbaca dari seberang ruangan; kotak berwarna tidak.
   const healthGroup = new THREE.Group()
   healthGroup.position.set(RECEPTION.x, 0, RECEPTION.z - 1.0)
-  const postMat = stdMat(0x2b3138, { metal: 0.5, rough: 0.4 })
+  const postMat = stdMat(pal(0x2b3138), { metal: 0.5, rough: 0.4 })
   const post = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.07, 1.5, 10), postMat)
   post.position.y = 0.75
   post.castShadow = true
@@ -1512,14 +1513,14 @@ export function buildOffice(scene: THREE.Scene, hour: number) {
     const D = tp.hd * 2 // depth in its own LOCAL z
     switch (tp.kind) {
       case 'sofa': {
-        const seat = new THREE.Mesh(rbox(W, 0.34, D - 0.12, 0.06), stdMat(0x7d8f6a, { rough: 0.95 }))
+        const seat = new THREE.Mesh(rbox(W, 0.34, D - 0.12, 0.06), stdMat(pal(0x7d8f6a), { rough: 0.95 }))
         seat.position.y = 0.28
         tg.add(seat)
-        const back = new THREE.Mesh(rbox(W, 0.5, 0.22, 0.06), stdMat(0x7d8f6a, { rough: 0.95 }))
+        const back = new THREE.Mesh(rbox(W, 0.5, 0.22, 0.06), stdMat(pal(0x7d8f6a), { rough: 0.95 }))
         back.position.set(0, 0.6, tp.hd - 0.11)
         tg.add(back)
         for (const ax of [-tp.hw + 0.13, tp.hw - 0.13]) {
-          const arm = new THREE.Mesh(rbox(0.24, 0.4, D - 0.12, 0.06), stdMat(0x6f8060, { rough: 0.95 }))
+          const arm = new THREE.Mesh(rbox(0.24, 0.4, D - 0.12, 0.06), stdMat(pal(0x6f8060), { rough: 0.95 }))
           arm.position.set(ax, 0.48, 0)
           tg.add(arm)
         }
@@ -1529,7 +1530,7 @@ export function buildOffice(scene: THREE.Scene, hour: number) {
           [-tp.hw + 0.14, tp.hd - 0.14],
           [tp.hw - 0.14, tp.hd - 0.14],
         ] as const) {
-          const foot = cyl(0.03, 0.03, 0.14, 0x5a4a34, 8)
+          const foot = cyl(0.03, 0.03, 0.14, pal(0x5a4a34), 8)
           foot.position.set(lx, 0.07, lz)
           tg.add(foot)
         }
@@ -1545,7 +1546,7 @@ export function buildOffice(scene: THREE.Scene, hour: number) {
           [-tp.hw + 0.12, tp.hd - 0.12],
           [tp.hw - 0.12, tp.hd - 0.12],
         ] as const) {
-          const leg = cyl(0.025, 0.025, tp.h, 0x6b4423, 8)
+          const leg = cyl(0.025, 0.025, tp.h, pal(0x6b4423), 8)
           leg.position.set(lx, tp.h / 2, lz)
           tg.add(leg)
         }
@@ -1557,7 +1558,7 @@ export function buildOffice(scene: THREE.Scene, hour: number) {
         tg.add(top)
         for (const tz of [-tp.hd + 0.5, tp.hd - 0.5]) {
           for (const tx of [-tp.hw + 0.16, tp.hw - 0.16]) {
-            const leg = box(0.1, tp.h - 0.06, 0.1, 0x8a9096, { metal: 0.4, rough: 0.5 })
+            const leg = box(0.1, tp.h - 0.06, 0.1, pal(0x8a9096), { metal: 0.4, rough: 0.5 })
             leg.position.set(tx, (tp.h - 0.06) / 2, tz)
             tg.add(leg)
           }
@@ -1565,12 +1566,12 @@ export function buildOffice(scene: THREE.Scene, hour: number) {
         break
       }
       case 'tbench': {
-        const top = new THREE.Mesh(rbox(W, 0.06, D, 0.03), stdMat(0x9c7a52, { rough: 0.8 }))
+        const top = new THREE.Mesh(rbox(W, 0.06, D, 0.03), stdMat(pal(0x9c7a52), { rough: 0.8 }))
         top.position.y = tp.h
         tg.add(top)
         for (const tz of [-tp.hd + 0.3, 0, tp.hd - 0.3]) {
           for (const tx of [-tp.hw + 0.1, tp.hw - 0.1]) {
-            const leg = cyl(0.022, 0.022, tp.h, 0x6b4423, 8)
+            const leg = cyl(0.022, 0.022, tp.h, pal(0x6b4423), 8)
             leg.position.set(tx, tp.h / 2, tz)
             tg.add(leg)
           }
@@ -1578,7 +1579,7 @@ export function buildOffice(scene: THREE.Scene, hour: number) {
         break
       }
       case 'workbar': {
-        const body = box(W, tp.h - 0.06, D, 0x6f5a44, { rough: 0.85 })
+        const body = box(W, tp.h - 0.06, D, pal(0x6f5a44), { rough: 0.85 })
         body.position.y = (tp.h - 0.06) / 2
         tg.add(body)
         const top = new THREE.Mesh(rbox(W + 0.08, 0.06, D + 0.1, 0.03), marbleMat)
@@ -1587,7 +1588,7 @@ export function buildOffice(scene: THREE.Scene, hour: number) {
         // a few power sockets along the bar's front face
         for (let i = 0; i < 4; i++) {
           const sx = -W / 2 + (i + 0.5) * (W / 4)
-          const sock = box(0.11, 0.09, 0.02, 0xe8e4d8, { rough: 0.5 })
+          const sock = box(0.11, 0.09, 0.02, pal(0xe8e4d8), { rough: 0.5 })
           sock.position.set(sx, tp.h - 0.28, tp.hd + 0.005)
           tg.add(sock)
         }
@@ -1596,39 +1597,39 @@ export function buildOffice(scene: THREE.Scene, hour: number) {
       case 'stool': {
         const seat = new THREE.Mesh(
           new THREE.CylinderGeometry(tp.hw, tp.hw, 0.06, 16),
-          stdMat(0x8f6f4a, { rough: 0.75 }),
+          stdMat(pal(0x8f6f4a), { rough: 0.75 }),
         )
         seat.position.y = tp.h
         tg.add(seat)
-        const stem = cyl(0.032, 0.045, tp.h, 0x8a8f95, 10, 0.6)
+        const stem = cyl(0.032, 0.045, tp.h, pal(0x8a8f95), 10, 0.6)
         stem.position.y = tp.h / 2
         tg.add(stem)
-        const ring = new THREE.Mesh(new THREE.TorusGeometry(tp.hw * 0.72, 0.018, 6, 16), stdMat(0x8a8f95, { metal: 0.6 }))
+        const ring = new THREE.Mesh(new THREE.TorusGeometry(tp.hw * 0.72, 0.018, 6, 16), stdMat(pal(0x8a8f95), { metal: 0.6 }))
         ring.rotation.x = Math.PI / 2
         ring.position.y = 0.22
         tg.add(ring)
-        const base = cyl(0.16, 0.18, 0.03, 0x8a8f95, 16, 0.6)
+        const base = cyl(0.16, 0.18, 0.03, pal(0x8a8f95), 16, 0.6)
         base.position.y = 0.015
         tg.add(base)
         break
       }
       case 'locker': {
         // A bank of lockers: the cabinet, then door lines and handles.
-        const body = box(W, tp.h, D, 0x4f6b7a, { rough: 0.6 })
+        const body = box(W, tp.h, D, pal(0x4f6b7a), { rough: 0.6 })
         body.position.y = tp.h / 2
         tg.add(body)
         const doors = Math.max(2, Math.round(D / 0.45))
         for (let i = 0; i < doors; i++) {
           const dz = -tp.hd + (i + 0.5) * (D / doors)
-          const line = box(0.012, tp.h - 0.12, 0.012, 0x2f3f48, { rough: 0.7 })
+          const line = box(0.012, tp.h - 0.12, 0.012, pal(0x2f3f48), { rough: 0.7 })
           line.position.set(-tp.hw + 0.005, tp.h / 2, dz - D / (2 * doors))
           tg.add(line)
-          const handle = box(0.02, 0.1, 0.02, 0xd8d8d2, { metal: 0.7 })
+          const handle = box(0.02, 0.1, 0.02, pal(0xd8d8d2), { metal: 0.7 })
           handle.position.set(-tp.hw - 0.01, tp.h / 2, dz + 0.12)
           tg.add(handle)
           // a vent at the top of each door
           for (let k = 0; k < 3; k++) {
-            const vent = box(0.01, 0.02, 0.14, 0x2f3f48, { rough: 0.7 })
+            const vent = box(0.01, 0.02, 0.14, pal(0x2f3f48), { rough: 0.7 })
             vent.position.set(-tp.hw - 0.005, tp.h - 0.16 - k * 0.05, dz)
             tg.add(vent)
           }
@@ -1637,26 +1638,26 @@ export function buildOffice(scene: THREE.Scene, hour: number) {
       }
       case 'coffee': {
         // A coffee point: a machine on a small cabinet.
-        const cab = box(W, 0.9, D, 0x6f5a44, { rough: 0.8 })
+        const cab = box(W, 0.9, D, pal(0x6f5a44), { rough: 0.8 })
         cab.position.y = 0.45
         tg.add(cab)
         const cabTop = new THREE.Mesh(rbox(W + 0.05, 0.05, D + 0.05, 0.02), marbleMat)
         cabTop.position.y = 0.925
         tg.add(cabTop)
-        const mg = box(0.34, 0.42, 0.32, 0x2f3438, { metal: 0.4, rough: 0.4 })
+        const mg = box(0.34, 0.42, 0.32, pal(0x2f3438), { metal: 0.4, rough: 0.4 })
         mg.position.y = 1.16
         tg.add(mg)
-        const head = box(0.28, 0.09, 0.24, 0x3d4449, { metal: 0.5 })
+        const head = box(0.28, 0.09, 0.24, pal(0x3d4449), { metal: 0.5 })
         head.position.set(0, 1.06, -0.13)
         tg.add(head)
-        const tray = box(0.28, 0.03, 0.18, 0x9aa2a8, { metal: 0.7 })
+        const tray = box(0.28, 0.03, 0.18, pal(0x9aa2a8), { metal: 0.7 })
         tray.position.set(0, 0.97, 0.12)
         tg.add(tray)
-        const plate = box(0.28, 0.02, 0.24, 0x6f767c, { metal: 0.6 })
+        const plate = box(0.28, 0.02, 0.24, pal(0x6f767c), { metal: 0.6 })
         plate.position.y = 1.38
         tg.add(plate)
         for (const cx of [-0.075, 0.075]) {
-          const cup = cyl(0.033, 0.026, 0.07, 0xf2efe8, 12, 0.1)
+          const cup = cyl(0.033, 0.026, 0.07, pal(0xf2efe8), 12, 0.1)
           cup.position.set(cx, 1.42, 0)
           tg.add(cup)
         }
@@ -1665,23 +1666,23 @@ export function buildOffice(scene: THREE.Scene, hour: number) {
       case 'shelf': {
         const H = tp.h
         for (const sx of [-tp.hw + 0.03, tp.hw - 0.03]) {
-          const side = box(0.06, H, D, 0x8f6f4a, { rough: 0.75 })
+          const side = box(0.06, H, D, pal(0x8f6f4a), { rough: 0.75 })
           side.position.set(sx, H / 2, 0)
           tg.add(side)
         }
-        const back = box(W, H, 0.04, 0x7a5f3f, { rough: 0.8 })
+        const back = box(W, H, 0.04, pal(0x7a5f3f), { rough: 0.8 })
         back.position.set(0, H / 2, -tp.hd + 0.02)
         tg.add(back)
         const levels = 4
         for (let i = 0; i < levels; i++) {
           const y = 0.14 + i * ((H - 0.28) / (levels - 1))
-          const shelf = box(W, 0.04, D, 0x9c7a52, { rough: 0.7 })
+          const shelf = box(W, 0.04, D, pal(0x9c7a52), { rough: 0.7 })
           shelf.position.set(0, y, 0)
           tg.add(shelf)
           for (let k = 0; k < 2; k++) {
             const oz = -tp.hd + 0.3 + k * (D - 0.6)
             const oh = 0.16 + ((i + k) % 3) * 0.06
-            const col = [0x4a6d8c, 0x8c6d4a, 0x6d8c4a][(i + k) % 3]
+            const col = [pal(0x4a6d8c), pal(0x8c6d4a), pal(0x6d8c4a)][(i + k) % 3]
             const thing = box(0.18, oh, 0.12, col, { rough: 0.7 })
             thing.position.set(0, y + 0.02 + oh / 2, oz)
             tg.add(thing)
@@ -1690,20 +1691,20 @@ export function buildOffice(scene: THREE.Scene, hour: number) {
         break
       }
       case 'plant': {
-        const pot = cyl(tp.hw * 0.72, tp.hw * 0.56, 0.4, 0x8c5a3f, 14, 0.1)
+        const pot = cyl(tp.hw * 0.72, tp.hw * 0.56, 0.4, pal(0x8c5a3f), 14, 0.1)
         pot.position.y = 0.2
         tg.add(pot)
-        const soil = cyl(tp.hw * 0.66, tp.hw * 0.66, 0.03, 0x3a2a1e, 14)
+        const soil = cyl(tp.hw * 0.66, tp.hw * 0.66, 0.03, pal(0x3a2a1e), 14)
         soil.position.y = 0.4
         tg.add(soil)
         for (let i = 0; i < 5; i++) {
           const a = (i / 5) * Math.PI * 2
-          const leaf = new THREE.Mesh(new THREE.ConeGeometry(0.12, 0.62, 6), stdMat(0x3f6b3a, { rough: 0.9 }))
+          const leaf = new THREE.Mesh(new THREE.ConeGeometry(0.12, 0.62, 6), stdMat(pal(0x3f6b3a), { rough: 0.9 }))
           leaf.position.set(Math.sin(a) * 0.12, 0.7, Math.cos(a) * 0.12)
           leaf.rotation.set(Math.cos(a) * 0.4, 0, -Math.sin(a) * 0.4)
           tg.add(leaf)
         }
-        const crown = new THREE.Mesh(new THREE.SphereGeometry(0.26, 10, 8), stdMat(0x4a7a42, { rough: 0.95 }))
+        const crown = new THREE.Mesh(new THREE.SphereGeometry(0.26, 10, 8), stdMat(pal(0x4a7a42), { rough: 0.95 }))
         crown.position.y = 0.86
         tg.add(crown)
         break
@@ -1728,23 +1729,23 @@ export function buildOffice(scene: THREE.Scene, hour: number) {
     switch (rp.kind) {
       case 'rack': {
         // A server rack: a dark cabinet with a glass front and blinking status lights.
-        const body = box(rp.hw * 2, rp.h, rp.hd * 2, 0x20262b, { metal: 0.5, rough: 0.45 })
+        const body = box(rp.hw * 2, rp.h, rp.hd * 2, pal(0x20262b), { metal: 0.5, rough: 0.45 })
         body.position.y = rp.h / 2
         rg.add(body)
-        const glass = box(rp.hw * 2 - 0.06, rp.h - 0.3, 0.04, 0x18242a, { emissive: 0x1d3b4a, ei: 0.5 })
+        const glass = box(rp.hw * 2 - 0.06, rp.h - 0.3, 0.04, pal(0x18242a), { emissive: pal(0x1d3b4a), ei: 0.5 })
         glass.position.set(0, rp.h / 2, rp.hd - 0.01)
         rg.add(glass)
         // server blades, each with two LEDs
         const units = Math.max(3, Math.floor((rp.h - 0.4) / 0.22))
         for (let i = 0; i < units; i++) {
           const y = 0.24 + i * 0.22
-          const blade = box(rp.hw * 2 - 0.1, 0.16, 0.02, 0x2f373d, { rough: 0.6 })
+          const blade = box(rp.hw * 2 - 0.1, 0.16, 0.02, pal(0x2f373d), { rough: 0.6 })
           blade.position.set(0, y, rp.hd + 0.005)
           rg.add(blade)
           for (const [lx, col] of [
-            [-rp.hw + 0.16, 0x4ad07a],
-            [-rp.hw + 0.26, 0x4ad07a],
-            [-rp.hw + 0.36, Math.random() > 0.5 ? 0x4ad07a : 0xd0a04a],
+            [-rp.hw + 0.16, pal(0x4ad07a)],
+            [-rp.hw + 0.26, pal(0x4ad07a)],
+            [-rp.hw + 0.36, Math.random() > 0.5 ? pal(0x4ad07a) : pal(0xd0a04a)],
           ] as const) {
             const led = box(0.035, 0.035, 0.01, col, { emissive: col, ei: 1.0 })
             led.position.set(lx, y, rp.hd + 0.018)
@@ -1755,18 +1756,18 @@ export function buildOffice(scene: THREE.Scene, hour: number) {
       }
       case 'whiteboard': {
         // A whiteboard on the wall, with a tray and a couple of marker pens.
-        const frame = box(0.06, rp.h, rp.hd * 2, 0xb9c4cb, { metal: 0.5, rough: 0.4 })
+        const frame = box(0.06, rp.h, rp.hd * 2, pal(0xb9c4cb), { metal: 0.5, rough: 0.4 })
         frame.position.y = rp.h / 2 + 0.5
         rg.add(frame)
-        const board = box(0.03, rp.h - 0.16, rp.hd * 2 - 0.16, 0xf4f4ee, { rough: 0.35 })
+        const board = box(0.03, rp.h - 0.16, rp.hd * 2 - 0.16, pal(0xf4f4ee), { rough: 0.35 })
         board.position.set(0.03, rp.h / 2 + 0.5, 0)
         rg.add(board)
-        const tray = box(0.14, 0.04, rp.hd * 2 - 0.2, 0x9aa2a8, { metal: 0.6 })
+        const tray = box(0.14, 0.04, rp.hd * 2 - 0.2, pal(0x9aa2a8), { metal: 0.6 })
         tray.position.set(0.06, 0.52, 0)
         rg.add(tray)
         for (const [tz, col] of [
-          [-0.5, 0xc23b2f],
-          [-0.42, 0x2f5d3a],
+          [-0.5, pal(0xc23b2f)],
+          [-0.42, pal(0x2f5d3a)],
         ] as const) {
           const pen = cyl(0.012, 0.012, 0.12, col, 8, 0.2)
           pen.rotation.z = Math.PI / 2
@@ -1782,12 +1783,12 @@ export function buildOffice(scene: THREE.Scene, hour: number) {
         top.position.y = rp.h
         rg.add(top)
         for (const tx of [-rp.hw + 0.18, rp.hw - 0.18]) {
-          const trestle = box(0.12, rp.h, rp.hd * 1.5, 0x8a9096, { metal: 0.4, rough: 0.5 })
+          const trestle = box(0.12, rp.h, rp.hd * 1.5, pal(0x8a9096), { metal: 0.4, rough: 0.5 })
           trestle.position.set(tx, rp.h / 2, 0)
           rg.add(trestle)
         }
         // a pegboard behind, with a few tools hanging
-        const peg = box(0.05, 0.9, rp.hd * 1.8, 0x9aa2a8, { rough: 0.7 })
+        const peg = box(0.05, 0.9, rp.hd * 1.8, pal(0x9aa2a8), { rough: 0.7 })
         peg.position.set(-rp.hw + 0.1, rp.h + 0.55, 0)
         rg.add(peg)
         for (const [pz, ph] of [
@@ -1796,7 +1797,7 @@ export function buildOffice(scene: THREE.Scene, hour: number) {
           [0.3, 0.22],
           [0.6, 0.3],
         ] as const) {
-          const tool = box(0.03, ph, 0.05, 0x3a4147, { metal: 0.5 })
+          const tool = box(0.03, ph, 0.05, pal(0x3a4147), { metal: 0.5 })
           tool.position.set(-rp.hw + 0.16, rp.h + 0.55 - ph / 2 + 0.2, pz)
           rg.add(tool)
         }
@@ -1805,7 +1806,7 @@ export function buildOffice(scene: THREE.Scene, hour: number) {
           [-0.1, -0.4, 0.3],
           [0.25, 0.35, 0.24],
         ] as const) {
-          const b = box(bw, 0.18, bw * 0.8, 0x6f767c, { rough: 0.8 })
+          const b = box(bw, 0.18, bw * 0.8, pal(0x6f767c), { rough: 0.8 })
           b.position.set(bx, rp.h + 0.12, bz)
           rg.add(b)
         }
@@ -1817,17 +1818,17 @@ export function buildOffice(scene: THREE.Scene, hour: number) {
         const W = rp.hw * 2
         const D = rp.hd * 2
         for (const sx of [-rp.hw + 0.03, rp.hw - 0.03]) {
-          const side = box(0.06, H, D, 0x8f6f4a, { rough: 0.75 })
+          const side = box(0.06, H, D, pal(0x8f6f4a), { rough: 0.75 })
           side.position.set(sx, H / 2, 0)
           rg.add(side)
         }
-        const back = box(W, H, 0.04, 0x7a5f3f, { rough: 0.8 })
+        const back = box(W, H, 0.04, pal(0x7a5f3f), { rough: 0.8 })
         back.position.set(0, H / 2, -rp.hd + 0.02)
         rg.add(back)
         const levels = 5
         for (let i = 0; i < levels; i++) {
           const y = 0.12 + i * ((H - 0.24) / (levels - 1))
-          const shelf = box(W, 0.04, D, 0x9c7a52, { rough: 0.7 })
+          const shelf = box(W, 0.04, D, pal(0x9c7a52), { rough: 0.7 })
           shelf.position.set(0, y, 0)
           rg.add(shelf)
           // a few objects per shelf, deterministic per (i)
@@ -1835,7 +1836,7 @@ export function buildOffice(scene: THREE.Scene, hour: number) {
           for (let k = 0; k < count; k++) {
             const oz = -rp.hd + 0.25 + k * ((D - 0.5) / Math.max(1, count - 1))
             const oh = 0.16 + ((i + k) % 3) * 0.06
-            const col = [0x4a6d8c, 0x8c6d4a, 0x6d8c4a, 0x8c4a6d][(i + k) % 4]
+            const col = [pal(0x4a6d8c), pal(0x8c6d4a), pal(0x6d8c4a), pal(0x8c4a6d)][(i + k) % 4]
             const thing = box(0.2, oh, 0.14, col, { rough: 0.7 })
             thing.position.set(0, y + 0.02 + oh / 2, oz)
             rg.add(thing)
@@ -1847,7 +1848,7 @@ export function buildOffice(scene: THREE.Scene, hour: number) {
         // A video wall: a dark frame holding a 2x2 grid of screens, each lit.
         const W = rp.hw * 2
         const H = rp.h
-        const frame = box(W, H, 0.1, 0x1b2226, { rough: 0.5 })
+        const frame = box(W, H, 0.1, pal(0x1b2226), { rough: 0.5 })
         frame.position.y = H / 2 + 0.5
         rg.add(frame)
         for (const [ox, oy] of [
@@ -1856,16 +1857,16 @@ export function buildOffice(scene: THREE.Scene, hour: number) {
           [-W / 4, -H / 4],
           [W / 4, -H / 4],
         ] as const) {
-          const scr = box(W / 2 - 0.08, H / 2 - 0.08, 0.02, 0x24343c, { emissive: 0x2a4a5a, ei: 0.75 })
+          const scr = box(W / 2 - 0.08, H / 2 - 0.08, 0.02, pal(0x24343c), { emissive: pal(0x2a4a5a), ei: 0.75 })
           scr.position.set(ox, H / 2 + 0.5 + oy, 0.06)
           rg.add(scr)
         }
         // a slim stand under it
-        const stand = box(W * 0.5, 0.06, 0.36, 0x2a2f34, { metal: 0.5 })
+        const stand = box(W * 0.5, 0.06, 0.36, pal(0x2a2f34), { metal: 0.5 })
         stand.position.y = 0.5
         rg.add(stand)
         for (const lx of [-W * 0.2, W * 0.2]) {
-          const leg = cyl(0.03, 0.03, 0.5, 0x3a4147, 8, 0.7)
+          const leg = cyl(0.03, 0.03, 0.5, pal(0x3a4147), 8, 0.7)
           leg.position.set(lx, 0.25, 0)
           rg.add(leg)
         }
@@ -1873,13 +1874,13 @@ export function buildOffice(scene: THREE.Scene, hour: number) {
       }
       case 'nook': {
         // A low round table with two soft tub chairs — the discussion nook.
-        const topm = cyl(rp.hw, rp.hw, 0.05, 0x8f6f4a, 22, 0.1)
+        const topm = cyl(rp.hw, rp.hw, 0.05, pal(0x8f6f4a), 22, 0.1)
         topm.position.y = rp.h
         rg.add(topm)
-        const stem = cyl(0.06, 0.09, rp.h, 0x6d7378, 10, 0.5)
+        const stem = cyl(0.06, 0.09, rp.h, pal(0x6d7378), 10, 0.5)
         stem.position.y = rp.h / 2
         rg.add(stem)
-        const base = cyl(0.28, 0.32, 0.04, 0x6d7378, 16, 0.5)
+        const base = cyl(0.28, 0.32, 0.04, pal(0x6d7378), 16, 0.5)
         base.position.y = 0.02
         rg.add(base)
         // Two tub chairs either side, in a soft colour, TURNED TO FACE THE TABLE.
@@ -1899,10 +1900,10 @@ export function buildOffice(scene: THREE.Scene, hour: number) {
           const cg = new THREE.Group()
           cg.position.set(cxx, 0, czz)
           cg.rotation.y = rot
-          const cs = new THREE.Mesh(rbox(0.62, 0.14, 0.6, 0.06), stdMat(0x8c6d5a, { rough: 0.95 }))
+          const cs = new THREE.Mesh(rbox(0.62, 0.14, 0.6, 0.06), stdMat(pal(0x8c6d5a), { rough: 0.95 }))
           cs.position.y = 0.42
           cg.add(cs)
-          const cb = new THREE.Mesh(rbox(0.62, 0.5, 0.14, 0.06), stdMat(0x8c6d5a, { rough: 0.95 }))
+          const cb = new THREE.Mesh(rbox(0.62, 0.5, 0.14, 0.06), stdMat(pal(0x8c6d5a), { rough: 0.95 }))
           cb.position.set(0, 0.66, 0.23)
           cg.add(cb)
           for (const [lx, lz] of [
@@ -1911,7 +1912,7 @@ export function buildOffice(scene: THREE.Scene, hour: number) {
             [-0.24, 0.22],
             [0.24, 0.22],
           ] as const) {
-            const cl = cyl(0.025, 0.025, 0.42, 0x6b4423, 8)
+            const cl = cyl(0.025, 0.025, 0.42, pal(0x6b4423), 8)
             cl.position.set(lx, 0.21, lz)
             cg.add(cl)
           }
@@ -1924,20 +1925,20 @@ export function buildOffice(scene: THREE.Scene, hour: number) {
         const W = rp.hw * 2
         const H = rp.h
         for (const sx of [-rp.hw + 0.08, rp.hw - 0.08]) {
-          const post = cyl(0.035, 0.035, H, 0x3a4147, 8, 0.7)
+          const post = cyl(0.035, 0.035, H, pal(0x3a4147), 8, 0.7)
           post.position.set(sx, H / 2, 0)
           rg.add(post)
         }
-        const cross = cyl(0.045, 0.045, W, 0x3a4147, 10, 0.7)
+        const cross = cyl(0.045, 0.045, W, pal(0x3a4147), 10, 0.7)
         cross.rotation.z = Math.PI / 2
         cross.position.y = H
         rg.add(cross)
         // the roll: a wide sheet falling to the floor
-        const sheet = box(W - 0.16, H - 0.1, 0.02, 0xe8e4d8, { rough: 0.95 })
+        const sheet = box(W - 0.16, H - 0.1, 0.02, pal(0xe8e4d8), { rough: 0.95 })
         sheet.position.set(0, (H - 0.1) / 2, 0)
         rg.add(sheet)
         // a soft tint across the top, so it reads as a photo backdrop
-        const tint = box(W - 0.16, H * 0.42, 0.015, 0xbfc9d4, { rough: 0.9 })
+        const tint = box(W - 0.16, H * 0.42, 0.015, pal(0xbfc9d4), { rough: 0.9 })
         tint.position.set(0, H - 0.1 - (H * 0.42) / 2, 0.02)
         rg.add(tint)
         break
@@ -1969,31 +1970,31 @@ export function buildOffice(scene: THREE.Scene, hour: number) {
           const hub = new THREE.Vector3(Math.sin(a) * hubR, hubY, Math.cos(a) * hubR)
           const dir = new THREE.Vector3().subVectors(hub, foot)
           const len = dir.length()
-          const leg = cyl(0.016, 0.022, len, 0x2f373d, 8, 0.6)
+          const leg = cyl(0.016, 0.022, len, pal(0x2f373d), 8, 0.6)
           leg.position.copy(foot).addScaledVector(dir, 0.5)
           leg.quaternion.setFromUnitVectors(up, dir.clone().normalize())
           rg.add(leg)
           // a foot pad ON THE FLOOR under each leg, so it clearly stands on something
-          const pad = cyl(0.034, 0.038, 0.03, 0x1b2226, 10, 0.3)
+          const pad = cyl(0.034, 0.038, 0.03, pal(0x1b2226), 10, 0.3)
           pad.position.copy(foot).setY(0.015)
           rg.add(pad)
         }
         // the column, ON THE AXIS from the hub up
-        const column = cyl(0.028, 0.03, H * 0.4, 0x2f373d, 10, 0.6)
+        const column = cyl(0.028, 0.03, H * 0.4, pal(0x2f373d), 10, 0.6)
         column.position.set(0, hubY + H * 0.14, 0)
         rg.add(column)
         // THE CAMERA, dead centre on the column's axis
         const camY = hubY + H * 0.34
-        const cam = box(0.24, 0.16, 0.18, 0x1b2226, { rough: 0.45 })
+        const cam = box(0.24, 0.16, 0.18, pal(0x1b2226), { rough: 0.45 })
         cam.position.set(0, camY, 0)
         rg.add(cam)
         // the lens points at the set (-z), on the same axis
-        const lens = cyl(0.055, 0.06, 0.12, 0x14181b, 14, 0.5)
+        const lens = cyl(0.055, 0.06, 0.12, pal(0x14181b), 14, 0.5)
         lens.rotation.x = Math.PI / 2
         lens.position.set(0, camY, -0.14)
         rg.add(lens)
         // a small monitor, centred on the axis and tipped toward the operator
-        const mon = box(0.16, 0.12, 0.02, 0x24343c, { emissive: 0x2a4a5a, ei: 0.6 })
+        const mon = box(0.16, 0.12, 0.02, pal(0x24343c), { emissive: pal(0x2a4a5a), ei: 0.6 })
         mon.position.set(0, camY - 0.02, 0.13)
         mon.rotation.x = -0.35
         rg.add(mon)
@@ -2017,15 +2018,15 @@ export function buildOffice(scene: THREE.Scene, hour: number) {
           const foot = new THREE.Vector3(Math.sin(a) * footR, 0, Math.cos(a) * footR)
           const hub = new THREE.Vector3(Math.sin(a) * hubR, hubY, Math.cos(a) * hubR)
           const dir = new THREE.Vector3().subVectors(hub, foot)
-          const leg = cyl(0.015, 0.02, dir.length(), 0x3a4147, 8, 0.6)
+          const leg = cyl(0.015, 0.02, dir.length(), pal(0x3a4147), 8, 0.6)
           leg.position.copy(foot).addScaledVector(dir, 0.5)
           leg.quaternion.setFromUnitVectors(up, dir.clone().normalize())
           rg.add(leg)
-          const pad = cyl(0.03, 0.034, 0.028, 0x1b2226, 10, 0.3)
+          const pad = cyl(0.03, 0.034, 0.028, pal(0x1b2226), 10, 0.3)
           pad.position.copy(foot).setY(0.014)
           rg.add(pad)
         }
-        const riser = cyl(0.026, 0.028, H * 0.62, 0x3a4147, 10, 0.6)
+        const riser = cyl(0.026, 0.028, H * 0.62, pal(0x3a4147), 10, 0.6)
         riser.position.y = hubY + H * 0.31
         rg.add(riser)
         // the head: a short arm reaching FORWARD (-z), then the softbox.
@@ -2039,17 +2040,17 @@ export function buildOffice(scene: THREE.Scene, hour: number) {
         // face behind a dark rim reads as "off". Putting the rim on the far side of the panel
         // (local +z, i.e. further from the aim) makes the white face the one that shows.
         const headY = H * 0.92
-        const arm = cyl(0.02, 0.02, 0.26, 0x3a4147, 8, 0.6)
+        const arm = cyl(0.02, 0.02, 0.26, pal(0x3a4147), 8, 0.6)
         arm.rotation.x = Math.PI / 2
         arm.position.set(0, headY, -0.13)
         rg.add(arm)
-        const panel = box(0.72, 0.72, 0.05, 0xf4efe2, { emissive: 0xfff0d0, ei: 0.85 })
+        const panel = box(0.72, 0.72, 0.05, pal(0xf4efe2), { emissive: pal(0xfff0d0), ei: 0.85 })
         panel.position.set(0, headY, -0.30)
         panel.rotation.x = -0.3
         rg.add(panel)
         // the rim BEHIND the panel (local +z is toward the stand, away from the aim), so the
         // white face — not the dark frame — is what points at the set
-        const rim = box(0.78, 0.78, 0.03, 0x2f373d, { rough: 0.5 })
+        const rim = box(0.78, 0.78, 0.03, pal(0x2f373d), { rough: 0.5 })
         rim.position.set(0, headY, -0.255)
         rim.rotation.x = -0.3
         rg.add(rim)
@@ -2057,23 +2058,23 @@ export function buildOffice(scene: THREE.Scene, hour: number) {
       }
       case 'plant': {
         // A pot with a bush, so every room has something alive in it.
-        const pot = cyl(rp.hw * 0.7, rp.hw * 0.55, 0.4, 0x8c5a3f, 14, 0.1)
+        const pot = cyl(rp.hw * 0.7, rp.hw * 0.55, 0.4, pal(0x8c5a3f), 14, 0.1)
         pot.position.y = 0.2
         rg.add(pot)
-        const soil = cyl(rp.hw * 0.65, rp.hw * 0.65, 0.03, 0x3a2a1e, 14)
+        const soil = cyl(rp.hw * 0.65, rp.hw * 0.65, 0.03, pal(0x3a2a1e), 14)
         soil.position.y = 0.4
         rg.add(soil)
         for (let i = 0; i < 5; i++) {
           const a = (i / 5) * Math.PI * 2
           const leaf = new THREE.Mesh(
             new THREE.ConeGeometry(0.12, 0.62, 6),
-            stdMat(0x3f6b3a, { rough: 0.9 }),
+            stdMat(pal(0x3f6b3a), { rough: 0.9 }),
           )
           leaf.position.set(Math.sin(a) * 0.12, 0.7, Math.cos(a) * 0.12)
           leaf.rotation.set(Math.cos(a) * 0.4, 0, -Math.sin(a) * 0.4)
           rg.add(leaf)
         }
-        const crown = new THREE.Mesh(new THREE.SphereGeometry(0.26, 10, 8), stdMat(0x4a7a42, { rough: 0.95 }))
+        const crown = new THREE.Mesh(new THREE.SphereGeometry(0.26, 10, 8), stdMat(pal(0x4a7a42), { rough: 0.95 }))
         crown.position.y = 0.86
         rg.add(crown)
         break
@@ -2098,49 +2099,49 @@ export function buildOffice(scene: THREE.Scene, hour: number) {
     g.add(top)
     // legs: two trestles, not four sticks
     for (const lx of [-0.62, 0.62]) {
-      const leg = box(0.08, 0.72, 0.86, 0xa9b7c1, { metal: 0.35, rough: 0.45 })
+      const leg = box(0.08, 0.72, 0.86, pal(0xa9b7c1), { metal: 0.35, rough: 0.45 })
       leg.position.set(lx, 0.36, 0)
       g.add(leg)
     }
     // monitor, on a stand, facing the sitter (local -Z is the desk's far side)
-    const screen = box(0.86, 0.5, 0.04, 0x24343c, { emissive: 0x1d3b4a, ei: 0.55, rough: 0.35 })
+    const screen = box(0.86, 0.5, 0.04, pal(0x24343c), { emissive: GLOW.monitor.emissive, ei: GLOW.monitor.ei, rough: 0.35 })
     screen.position.set(0, 1.12, -0.28)
     screen.userData = { kind: 'monitor', deskIndex: d.index }
     g.add(screen)
     monitors[d.index] = screen
-    const stand = box(0.1, 0.26, 0.1, 0x3a4147, { metal: 0.5 })
+    const stand = box(0.1, 0.26, 0.1, pal(0x3a4147), { metal: 0.5 })
     stand.position.set(0, 0.86, -0.28)
     g.add(stand)
-    const foot = box(0.34, 0.03, 0.2, 0x3a4147, { metal: 0.5 })
+    const foot = box(0.34, 0.03, 0.2, pal(0x3a4147), { metal: 0.5 })
     foot.position.set(0, 0.755, -0.28)
     g.add(foot)
     // desk lamp, warm at night
-    const arm = cyl(0.025, 0.025, 0.42, 0x6d7378, 8, 0.6)
+    const arm = cyl(0.025, 0.025, 0.42, pal(0x6d7378), 8, 0.6)
     arm.position.set(0.66, 0.94, -0.3)
     g.add(arm)
-    const shade = new THREE.Mesh(new THREE.ConeGeometry(0.12, 0.16, 12, 1, true), stdMat(0xf0e2c4, { emissive: 0xffd89a, ei: hour >= 18 || hour < 6 ? 0.9 : 0.2 }))
+    const shade = new THREE.Mesh(new THREE.ConeGeometry(0.12, 0.16, 12, 1, true), stdMat(GLOW.lampShade.color, { emissive: GLOW.lampShade.emissive, ei: hour >= 18 || hour < 6 ? GLOW.lampShade.night : GLOW.lampShade.day }))
     shade.position.set(0.66, 1.12, -0.3)
     shade.rotation.x = 0.5
     g.add(shade)
-    const lamp = new THREE.PointLight(0xffdcae, hour >= 18 || hour < 6 ? 0.5 : 0.12, 4.5)
+    const lamp = new THREE.PointLight(LIGHTS.deskLamp.color, hour >= 18 || hour < 6 ? LIGHTS.deskLamp.initNight : LIGHTS.deskLamp.initDay, 4.5)
     lamp.position.set(0.66, 1.05, -0.3)
     g.add(lamp)
     lamps.push(lamp)
     // chair: seat, back, star base
     const chair = new THREE.Group()
     chair.position.set(DESK_CHAIR.x, 0, DESK_CHAIR.z)
-    const seat = new THREE.Mesh(rbox(0.5, 0.08, 0.48, 0.03), stdMat(0x5f7382, { rough: 0.85 }))
+    const seat = new THREE.Mesh(rbox(0.5, 0.08, 0.48, 0.03), stdMat(pal(0x5f7382), { rough: 0.85 }))
     seat.position.y = 0.5
     chair.add(seat)
-    const backr = new THREE.Mesh(rbox(0.48, 0.5, 0.08, 0.03), stdMat(0x5f7382, { rough: 0.85 }))
+    const backr = new THREE.Mesh(rbox(0.48, 0.5, 0.08, 0.03), stdMat(pal(0x5f7382), { rough: 0.85 }))
     backr.position.set(0, 0.78, 0.28)
     chair.add(backr)
-    const post = cyl(0.05, 0.05, 0.42, 0x8a8f95, 10, 0.6)
+    const post = cyl(0.05, 0.05, 0.42, pal(0x8a8f95), 10, 0.6)
     post.position.y = 0.26
     chair.add(post)
     for (let i = 0; i < 5; i++) {
       const a = (i / 5) * Math.PI * 2
-      const arm = box(0.32, 0.04, 0.06, 0x8a8f95, { metal: 0.5 })
+      const arm = box(0.32, 0.04, 0.06, pal(0x8a8f95), { metal: 0.5 })
       arm.position.set(Math.cos(a) * 0.16, 0.06, Math.sin(a) * 0.16)
       arm.rotation.y = -a
       chair.add(arm)
@@ -2173,7 +2174,7 @@ export function buildOffice(scene: THREE.Scene, hour: number) {
     top.castShadow = true
     top.receiveShadow = true
     g.add(top)
-    const ped = box(t.rx * 0.8, 0.7, t.rz * 0.8, 0x8a6a44, { rough: 0.6 })
+    const ped = box(t.rx * 0.8, 0.7, t.rz * 0.8, pal(0x8a6a44), { rough: 0.6 })
     ped.position.y = 0.35
     g.add(ped)
     // chairs on the ring
@@ -2187,10 +2188,10 @@ export function buildOffice(scene: THREE.Scene, hour: number) {
       // matter where they sat — which is why half of them had their backs to the
       // table. The self-test now checks the world direction of every back rest.
       chair.rotation.y = s.facing + Math.PI
-      const seat = new THREE.Mesh(rbox(0.48, 0.08, 0.46, 0.03), stdMat(0x6b7d8a, { rough: 0.85 }))
+      const seat = new THREE.Mesh(rbox(0.48, 0.08, 0.46, 0.03), stdMat(pal(0x6b7d8a), { rough: 0.85 }))
       seat.position.y = 0.5
       chair.add(seat)
-      const backr = new THREE.Mesh(rbox(0.46, 0.46, 0.07, 0.03), stdMat(0x6b7d8a, { rough: 0.85 }))
+      const backr = new THREE.Mesh(rbox(0.46, 0.46, 0.07, 0.03), stdMat(pal(0x6b7d8a), { rough: 0.85 }))
       backr.position.set(0, 0.75, 0.25)
       chair.add(backr)
       for (const [lx, lz] of [
@@ -2199,7 +2200,7 @@ export function buildOffice(scene: THREE.Scene, hour: number) {
         [-0.2, 0.2],
         [0.2, 0.2],
       ] as const) {
-        const leg = cyl(0.025, 0.025, 0.48, 0x8a8f95, 8, 0.5)
+        const leg = cyl(0.025, 0.025, 0.48, pal(0x8a8f95), 8, 0.5)
         leg.position.set(lx, 0.24, lz)
         chair.add(leg)
       }
@@ -2216,11 +2217,11 @@ export function buildOffice(scene: THREE.Scene, hour: number) {
     board.userData = { kind: 'whiteboard' }
     board.castShadow = true
     group.add(board)
-    const frame = box(KANBAN_BOARD.w + 0.16, KANBAN_BOARD.h + 0.16, 0.08, 0x8a6a44, { rough: 0.6 })
+    const frame = box(KANBAN_BOARD.w + 0.16, KANBAN_BOARD.h + 0.16, 0.08, pal(0x8a6a44), { rough: 0.6 })
     frame.position.set(KANBAN_BOARD.x, KANBAN_BOARD.y, KANBAN_BOARD.z)
     group.add(frame)
     // chalk tray
-    const tray = box(KANBAN_BOARD.w, 0.06, 0.14, 0x6f5c45, { rough: 0.7 })
+    const tray = box(KANBAN_BOARD.w, 0.06, 0.14, pal(0x6f5c45), { rough: 0.7 })
     tray.position.set(KANBAN_BOARD.x, KANBAN_BOARD.y - KANBAN_BOARD.h / 2 - 0.08, KANBAN_BOARD.z + 0.06)
     group.add(tray)
     // expose the board mesh for scene.ts (it pins the card grid / raycast to it)
@@ -2238,10 +2239,10 @@ export function buildOffice(scene: THREE.Scene, hour: number) {
     const suite = new THREE.Group()
     suite.name = 'ceo-suite'
     group.add(suite)
-    const leather = stdMat(0x2b2522, { rough: 0.55 })
-    const chrome = stdMat(0x9aa0a6, { metal: 0.85, rough: 0.3 })
-    const fabric = stdMat(0x83a7cc, { rough: 0.95 })
-    const guestFabric = stdMat(0xb59a7a, { rough: 0.8 })
+    const leather = stdMat(pal(0x2b2522), { rough: 0.55 })
+    const chrome = stdMat(pal(0x9aa0a6), { metal: 0.85, rough: 0.3 })
+    const fabric = stdMat(pal(0x83a7cc), { rough: 0.95 })
+    const guestFabric = stdMat(pal(0xb59a7a), { rough: 0.8 })
 
     // Meja eksekutif: daun kayu di atas dua kabinet, dan panel penutup di sisi TAMU (+z,
     // arah pintu) — tamu melihat panel, bos punya ruang kaki di sisi utara.
@@ -2265,14 +2266,14 @@ export function buildOffice(scene: THREE.Scene, hour: number) {
     // supaya bisa diklik (intip layar) dan menyala saat CEO bekerja, seperti monitor meja lain.
     // Emisif kecil karena scene hanya mengubah `emissiveIntensity` — tanpa warna emisif,
     // layarnya tidak akan pernah terlihat menyala.
-    const mon = box(0.62, 0.36, 0.03, 0x1b1d20, { rough: 0.4, emissive: 0x1d3b4a, ei: 0.55 })
+    const mon = box(0.62, 0.36, 0.03, pal(0x1b1d20), { rough: 0.4, emissive: GLOW.monitor.emissive, ei: GLOW.monitor.ei })
     mon.position.set(0, S.desk.h + 0.3, 0.18)
     desk.add(mon)
     for (const d of DESKS.filter((x) => x.level === 1)) {
       mon.userData = { kind: 'monitor', deskIndex: d.index }
       monitors[d.index] = mon
     }
-    const monStand = box(0.04, 0.12, 0.04, 0x1b1d20)
+    const monStand = box(0.04, 0.12, 0.04, pal(0x1b1d20))
     monStand.position.set(0, S.desk.h + 0.06, 0.2)
     desk.add(monStand)
     suite.add(desk)
@@ -2341,7 +2342,7 @@ export function buildOffice(scene: THREE.Scene, hour: number) {
         [-0.22, 0.2],
         [0.22, 0.2],
       ] as const) {
-        const leg = box(0.04, 0.42, 0.04, 0x4a3a2c, { rough: 0.6 })
+        const leg = box(0.04, 0.42, 0.04, pal(0x4a3a2c), { rough: 0.6 })
         leg.position.set(lx, 0.21, lz)
         ch.add(leg)
       }
@@ -2349,7 +2350,7 @@ export function buildOffice(scene: THREE.Scene, hour: number) {
         const arm = new THREE.Mesh(rbox(0.06, 0.05, 0.46, 0.02), guestFabric)
         arm.position.set(sx * 0.28, 0.66, 0.02)
         ch.add(arm)
-        const post = box(0.04, 0.16, 0.04, 0x4a3a2c)
+        const post = box(0.04, 0.16, 0.04, pal(0x4a3a2c))
         post.position.set(sx * 0.28, 0.56, -0.16)
         ch.add(post)
       }
@@ -2394,12 +2395,12 @@ export function buildOffice(scene: THREE.Scene, hour: number) {
       tt.position.y = t.h - 0.025
       tt.castShadow = true
       g.add(tt)
-      const shelf = box(t.w - 0.1, 0.03, t.d - 0.1, 0x4a3a2c, { rough: 0.6 })
+      const shelf = box(t.w - 0.1, 0.03, t.d - 0.1, pal(0x4a3a2c), { rough: 0.6 })
       shelf.position.y = 0.12
       g.add(shelf)
       for (const sx of [-1, 1]) {
         for (const sz of [-1, 1]) {
-          const leg = box(0.05, t.h - 0.05, 0.05, 0x2b2522, { rough: 0.5 })
+          const leg = box(0.05, t.h - 0.05, 0.05, pal(0x2b2522), { rough: 0.5 })
           leg.position.set(sx * (t.w / 2 - 0.06), (t.h - 0.05) / 2, sz * (t.d / 2 - 0.06))
           g.add(leg)
         }
@@ -2414,11 +2415,11 @@ export function buildOffice(scene: THREE.Scene, hour: number) {
       const g = new THREE.Group()
       g.name = 'ceo-tv'
       g.position.set(tv.x, y + (tv.y0 + tv.y1) / 2, tv.z)
-      const frame = box(tv.t, tv.y1 - tv.y0, tv.len, 0x16181b, { rough: 0.4, metal: 0.3 })
+      const frame = box(tv.t, tv.y1 - tv.y0, tv.len, pal(0x16181b), { rough: 0.4, metal: 0.3 })
       g.add(frame)
-      const screen = box(0.01, tv.y1 - tv.y0 - 0.08, tv.len - 0.08, 0x1f3242, {
+      const screen = box(0.01, tv.y1 - tv.y0 - 0.08, tv.len - 0.08, pal(0x1f3242), {
         rough: 0.2,
-        emissive: 0x0d1c28,
+        emissive: pal(0x0d1c28),
         ei: 0.5,
       })
       screen.position.x = -tv.t / 2 - 0.004
@@ -2433,12 +2434,12 @@ export function buildOffice(scene: THREE.Scene, hour: number) {
       const g = new THREE.Group()
       g.name = 'ceo-whiteboard'
       g.position.set(wb.x, y + (wb.y0 + wb.y1) / 2, wb.z)
-      const frame = box(wb.len, wb.y1 - wb.y0, wb.t, 0xb8bec4, { metal: 0.6, rough: 0.35 })
+      const frame = box(wb.len, wb.y1 - wb.y0, wb.t, pal(0xb8bec4), { metal: 0.6, rough: 0.35 })
       g.add(frame)
-      const surface = box(wb.len - 0.1, wb.y1 - wb.y0 - 0.1, 0.01, 0xf7f8f6, { rough: 0.3 })
+      const surface = box(wb.len - 0.1, wb.y1 - wb.y0 - 0.1, 0.01, pal(0xf7f8f6), { rough: 0.3 })
       surface.position.z = wb.t / 2 + 0.005
       g.add(surface)
-      const tray = box(0.9, 0.04, 0.08, 0xb8bec4, { metal: 0.6, rough: 0.35 })
+      const tray = box(0.9, 0.04, 0.08, pal(0xb8bec4), { metal: 0.6, rough: 0.35 })
       tray.position.set(0, -(wb.y1 - wb.y0) / 2 + 0.02, wb.t / 2 + 0.04)
       g.add(tray)
       suite.add(g)
@@ -2450,12 +2451,12 @@ export function buildOffice(scene: THREE.Scene, hour: number) {
       const g = new THREE.Group()
       g.name = `ceo-plant-${i}`
       g.position.set(p.x, y, p.z)
-      const pot = cyl(0.22, 0.17, 0.45, 0xa8674a, 14)
+      const pot = cyl(0.22, 0.17, 0.45, pal(0xa8674a), 14)
       pot.position.y = 0.225
       g.add(pot)
       for (let k = 0; k < 3; k++) {
         const r = S.plantR - k * 0.07
-        const bush = new THREE.Mesh(new THREE.IcosahedronGeometry(r, 0), stdMat(0x4f8b55, { rough: 0.9 }))
+        const bush = new THREE.Mesh(new THREE.IcosahedronGeometry(r, 0), stdMat(pal(0x4f8b55), { rough: 0.9 }))
         bush.position.y = 0.7 + k * 0.3
         bush.scale.set(1, 0.8, 1)
         g.add(bush)
@@ -2482,27 +2483,27 @@ export function buildOffice(scene: THREE.Scene, hour: number) {
     top.position.y = 1.05
     top.castShadow = true
     g.add(top)
-    const body = box(3.5, 0.98, 0.8, 0xe8e2d4, { rough: 0.85 })
+    const body = box(3.5, 0.98, 0.8, pal(0xe8e2d4), { rough: 0.85 })
     body.position.y = 0.5
     g.add(body)
     // brass kick plate, the only gold in the room
-    const kick = box(3.52, 0.1, 0.82, 0xc9a24a, { metal: 0.8, rough: 0.3 })
+    const kick = box(3.52, 0.1, 0.82, pal(0xc9a24a), { metal: 0.8, rough: 0.3 })
     kick.position.y = 0.06
     g.add(kick)
     group.add(g)
     // staff chair behind the counter
     const chair = new THREE.Group()
     chair.position.set(RECEPTION.x, 0, RECEPTION.z - 1.15)
-    const seat = new THREE.Mesh(rbox(0.5, 0.08, 0.48, 0.03), stdMat(0x5f7382, { rough: 0.85 }))
+    const seat = new THREE.Mesh(rbox(0.5, 0.08, 0.48, 0.03), stdMat(pal(0x5f7382), { rough: 0.85 }))
     seat.position.y = 0.5
     chair.add(seat)
-    const backr = new THREE.Mesh(rbox(0.48, 0.5, 0.08, 0.03), stdMat(0x5f7382, { rough: 0.85 }))
+    const backr = new THREE.Mesh(rbox(0.48, 0.5, 0.08, 0.03), stdMat(pal(0x5f7382), { rough: 0.85 }))
     backr.position.set(0, 0.78, -0.28)
     chair.add(backr)
     group.add(chair)
     // waiting bench + planters
     for (const bx of [-11.5, 11.5]) {
-      const bench = new THREE.Mesh(rbox(2.6, 0.4, 0.7, 0.06), stdMat(0x8f6f4a, { rough: 0.8 }))
+      const bench = new THREE.Mesh(rbox(2.6, 0.4, 0.7, 0.06), stdMat(pal(0x8f6f4a), { rough: 0.8 }))
       bench.position.set(bx, 0.3, 18.5)
       bench.castShadow = true
       group.add(bench)
@@ -2513,11 +2514,11 @@ export function buildOffice(scene: THREE.Scene, hour: number) {
       [-3.5, 17.0],
       [3.5, 17.0],
     ] as const) {
-      const pot = cyl(0.3, 0.24, 0.6, 0xa8674a, 14)
+      const pot = cyl(0.3, 0.24, 0.6, pal(0xa8674a), 14)
       pot.position.set(px, 0.3, pz)
       group.add(pot)
       for (let i = 0; i < 3; i++) {
-        const bush = new THREE.Mesh(new THREE.IcosahedronGeometry(0.48 - i * 0.1, 0), stdMat(0x4f8b55, { rough: 0.9 }))
+        const bush = new THREE.Mesh(new THREE.IcosahedronGeometry(0.48 - i * 0.1, 0), stdMat(pal(0x4f8b55), { rough: 0.9 }))
         bush.position.set(px, 0.85 + i * 0.38, pz)
         bush.scale.set(1, 0.8, 1)
         group.add(bush)
@@ -2528,7 +2529,7 @@ export function buildOffice(scene: THREE.Scene, hour: number) {
       const leaf = new THREE.Mesh(new THREE.BoxGeometry(1.9, 2.3, 0.06), glassMat)
       leaf.position.set(DOOR.x + side * 1.0, 1.15, HALF_D)
       group.add(leaf)
-      const frame = box(2.0, 2.4, 0.09, 0x2b3f49, { metal: 0.4, rough: 0.4 })
+      const frame = box(2.0, 2.4, 0.09, pal(0x2b3f49), { metal: 0.4, rough: 0.4 })
       frame.position.set(DOOR.x + side * 1.0, 1.2, HALF_D + 0.02)
       group.add(frame)
       const inner = new THREE.Mesh(new THREE.BoxGeometry(1.8, 2.2, 0.1), glassMat)
@@ -2538,7 +2539,7 @@ export function buildOffice(scene: THREE.Scene, hour: number) {
     // office name plate above the doors (edited through the UI, stored in the DB).
     // It faces OUT (south, toward the street) so a visitor reads it on approach —
     // facing north put the text on the inside face, invisible from the entrance.
-    const namePlate = box(6.2, 0.9, 0.12, 0x2a1f16, { rough: 0.6 })
+    const namePlate = box(6.2, 0.9, 0.12, pal(0x2a1f16), { rough: 0.6 })
     namePlate.position.set(DOOR.x, 3.5, HALF_D + 0.08)
     namePlate.name = 'office-name-plate'
     group.add(namePlate)
@@ -2548,12 +2549,12 @@ export function buildOffice(scene: THREE.Scene, hour: number) {
     nameFace.name = 'office-name-face'
     group.add(nameFace)
     // canopy over the entrance, so the doorway reads from above
-    const canopy = box(7.0, 0.22, 2.6, 0xe8eef2, { rough: 0.85 })
+    const canopy = box(7.0, 0.22, 2.6, pal(0xe8eef2), { rough: 0.85 })
     canopy.position.set(DOOR.x, 3.1, HALF_D + 1.3)
     canopy.castShadow = true
     group.add(canopy)
     for (const cx of [-3.2, 3.2]) {
-      const col = cyl(0.12, 0.12, 3.0, 0xe6e2d8, 10)
+      const col = cyl(0.12, 0.12, 3.0, pal(0xe6e2d8), 10)
       col.position.set(DOOR.x + cx, 1.5, HALF_D + 2.4)
       col.castShadow = true
       group.add(col)
@@ -2581,27 +2582,27 @@ export function buildOffice(scene: THREE.Scene, hour: number) {
     // clear gap, measured from the same constants the footprints and the self-test read.
     const len = PANTRY_COUNTER.z2 - PANTRY_COUNTER.z1
     const cz = PANTRY_COUNTER.z1 + len / 2
-    const body = box(0.9, 0.9, len, 0xe8e2d4, { rough: 0.85 })
+    const body = box(0.9, 0.9, len, pal(0xe8e2d4), { rough: 0.85 })
     body.position.set(0, 0.45, cz - PANTRY.z)
     g.add(body)
     const top = new THREE.Mesh(rbox(1.0, 0.08, len + 0.1, 0.04), marbleMat)
     top.position.set(0, 0.94, cz - PANTRY.z)
     g.add(top)
     // sink: a recessed box with a tap
-    const sink = box(0.7, 0.14, 0.9, 0xb9c4cb, { metal: 0.7, rough: 0.3 })
+    const sink = box(0.7, 0.14, 0.9, pal(0xb9c4cb), { metal: 0.7, rough: 0.3 })
     sink.position.set(0, 0.9, PANTRY_SINK_Z - PANTRY.z)
     g.add(sink)
-    const tap = cyl(0.03, 0.03, 0.4, 0xcfd6da, 8, 0.9)
+    const tap = cyl(0.03, 0.03, 0.4, pal(0xcfd6da), 8, 0.9)
     tap.position.set(-0.28, 1.15, PANTRY_SINK_Z - PANTRY.z)
     g.add(tap)
     // FRIDGE at the north end, NORTH of the counter's end, so the two never overlap.
     // The counter starts at PANTRY_COUNTER.z1 and the fridge ends before it.
-    const fridge = box(0.85, 1.9, 0.8, 0xd7dee2, { metal: 0.4, rough: 0.35 })
+    const fridge = box(0.85, 1.9, 0.8, pal(0xd7dee2), { metal: 0.4, rough: 0.35 })
     fridge.position.set(0, 0.95, FRIDGE.z - PANTRY.z)
     g.add(fridge)
     // wall shelves
     for (let i = 0; i < 3; i++) {
-      const shelf = box(0.4, 0.05, len - 0.4, 0x8f6f4a, { rough: 0.7 })
+      const shelf = box(0.4, 0.05, len - 0.4, pal(0x8f6f4a), { rough: 0.7 })
       shelf.position.set(-0.55, 1.35 + i * 0.42, cz - PANTRY.z)
       g.add(shelf)
     }
@@ -2614,22 +2615,22 @@ export function buildOffice(scene: THREE.Scene, hour: number) {
       // here put the cooler at z = 8 + 11.8 = 19.8 — inside the pantry's south wall, where
       // nothing could see it. Caught by probing the live scene for meshes near the constant.
       cg.position.set(WATER_COOLER.x - PANTRY.x, 0, WATER_COOLER.z - PANTRY.z)
-      const body = box(0.42, 1.05, 0.42, 0xe4e8ea, { metal: 0.3, rough: 0.35 })
+      const body = box(0.42, 1.05, 0.42, pal(0xe4e8ea), { metal: 0.3, rough: 0.35 })
       body.position.y = 0.52
       cg.add(body)
       // the tap recess
-      const tap = cyl(0.035, 0.035, 0.16, 0x9aa2a8, 10, 0.8)
+      const tap = cyl(0.035, 0.035, 0.16, pal(0x9aa2a8), 10, 0.8)
       tap.rotation.x = Math.PI / 2
       tap.position.set(0, 0.72, -0.24)
       cg.add(tap)
       // the bottle: translucent blue, sitting in the collar
-      const collar = cyl(0.11, 0.13, 0.1, 0xcfd6da, 14, 0.3)
+      const collar = cyl(0.11, 0.13, 0.1, pal(0xcfd6da), 14, 0.3)
       collar.position.y = 1.09
       cg.add(collar)
       const bottle = new THREE.Mesh(
         new THREE.CylinderGeometry(0.16, 0.15, 0.44, 16),
         new THREE.MeshStandardMaterial({
-          color: 0x6fb6d8,
+          color: pal(0x6fb6d8),
           transparent: true,
           opacity: 0.55,
           roughness: 0.25,
@@ -2637,7 +2638,7 @@ export function buildOffice(scene: THREE.Scene, hour: number) {
       )
       bottle.position.y = 1.36
       cg.add(bottle)
-      const neck = cyl(0.07, 0.09, 0.09, 0x6fb6d8, 12, 0.2)
+      const neck = cyl(0.07, 0.09, 0.09, pal(0x6fb6d8), 12, 0.2)
       neck.position.y = 1.12
       cg.add(neck)
       g.add(cg)
@@ -2647,21 +2648,21 @@ export function buildOffice(scene: THREE.Scene, hour: number) {
     {
       const mg = new THREE.Group()
       mg.position.set(0, 0.98, PANTRY_COFFEE_Z - PANTRY.z)
-      const body = box(0.36, 0.44, 0.34, 0x2f3438, { metal: 0.4, rough: 0.4 })
+      const body = box(0.36, 0.44, 0.34, pal(0x2f3438), { metal: 0.4, rough: 0.4 })
       body.position.y = 0.22
       mg.add(body)
-      const head = box(0.3, 0.1, 0.26, 0x3d4449, { metal: 0.5, rough: 0.35 })
+      const head = box(0.3, 0.1, 0.26, pal(0x3d4449), { metal: 0.5, rough: 0.35 })
       head.position.set(0, 0.12, -0.14)
       mg.add(head)
-      const tray = box(0.3, 0.03, 0.2, 0x9aa2a8, { metal: 0.7, rough: 0.3 })
+      const tray = box(0.3, 0.03, 0.2, pal(0x9aa2a8), { metal: 0.7, rough: 0.3 })
       tray.position.set(0, 0.03, 0.13)
       mg.add(tray)
-      const plate = box(0.3, 0.02, 0.26, 0x6f767c, { metal: 0.6, rough: 0.4 })
+      const plate = box(0.3, 0.02, 0.26, pal(0x6f767c), { metal: 0.6, rough: 0.4 })
       plate.position.y = 0.45
       mg.add(plate)
       // two cups on the warming plate
       for (const cx of [-0.08, 0.08]) {
-        const cup = cyl(0.035, 0.028, 0.07, 0xf2efe8, 12, 0.1)
+        const cup = cyl(0.035, 0.028, 0.07, pal(0xf2efe8), 12, 0.1)
         cup.position.set(cx, 0.49, 0)
         mg.add(cup)
       }
@@ -2672,13 +2673,13 @@ export function buildOffice(scene: THREE.Scene, hour: number) {
     for (const sz of PANTRY_STOOLS) {
       const g2 = new THREE.Group()
       g2.position.set(PANTRY.x + PANTRY_STOOL_GAP, 0, sz)
-      const seat = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.22, 0.07, 16), stdMat(0x8f6f4a, { rough: 0.7 }))
+      const seat = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.22, 0.07, 16), stdMat(pal(0x8f6f4a), { rough: 0.7 }))
       seat.position.y = 0.64
       g2.add(seat)
-      const stem = cyl(0.035, 0.045, 0.62, 0x8a8f95, 10, 0.6)
+      const stem = cyl(0.035, 0.045, 0.62, pal(0x8a8f95), 10, 0.6)
       stem.position.y = 0.32
       g2.add(stem)
-      const ring = new THREE.Mesh(new THREE.TorusGeometry(0.16, 0.02, 6, 16), stdMat(0x8a8f95, { metal: 0.6 }))
+      const ring = new THREE.Mesh(new THREE.TorusGeometry(0.16, 0.02, 6, 16), stdMat(pal(0x8a8f95), { metal: 0.6 }))
       ring.rotation.x = Math.PI / 2
       ring.position.y = 0.24
       g2.add(ring)
@@ -2695,14 +2696,14 @@ export function buildOffice(scene: THREE.Scene, hour: number) {
     // described as "facing the courtyard glass" while sitting at z=-12 with the TV
     // at z=-15.4 — i.e. the TV floated in the middle of the room and the sofa
     // faced a wall. Both now come from LOUNGE / LOUNGE_TV.
-    const seat = new THREE.Mesh(rbox(2.8, 0.34, 1.0, 0.06), stdMat(0x83a7cc, { rough: 0.95 }))
+    const seat = new THREE.Mesh(rbox(2.8, 0.34, 1.0, 0.06), stdMat(pal(0x83a7cc), { rough: 0.95 }))
     seat.position.y = 0.28
     g.add(seat)
-    const back = new THREE.Mesh(rbox(2.8, 0.52, 0.26, 0.06), stdMat(0x83a7cc, { rough: 0.95 }))
+    const back = new THREE.Mesh(rbox(2.8, 0.52, 0.26, 0.06), stdMat(pal(0x83a7cc), { rough: 0.95 }))
     back.position.set(0, 0.62, 0.4)
     g.add(back)
     for (const ax of [-1.42, 1.42]) {
-      const arm = new THREE.Mesh(rbox(0.24, 0.4, 0.98, 0.06), stdMat(0x83a7cc, { rough: 0.95 }))
+      const arm = new THREE.Mesh(rbox(0.24, 0.4, 0.98, 0.06), stdMat(pal(0x83a7cc), { rough: 0.95 }))
       arm.position.set(ax, 0.5, 0)
       g.add(arm)
     }
@@ -2716,19 +2717,19 @@ export function buildOffice(scene: THREE.Scene, hour: number) {
       [-0.5, 0.2],
       [0.5, 0.2],
     ] as const) {
-      const leg = cyl(0.03, 0.03, 0.42, 0x8a6a44, 8)
+      const leg = cyl(0.03, 0.03, 0.42, pal(0x8a6a44), 8)
       leg.position.set(LOUNGE_TABLE.x - LOUNGE.x + lx, 0.21, LOUNGE_TABLE.z - LOUNGE.z + lz)
       g.add(leg)
     }
     group.add(g)
     // TV flat on the north wall, at the sofa's own x
-    const tv = box(1.8, 1.0, 0.08, 0x1b2226, { metal: 0.3, rough: 0.3 })
+    const tv = box(1.8, 1.0, 0.08, pal(0x1b2226), { metal: 0.3, rough: 0.3 })
     tv.position.set(LOUNGE_TV.x, LOUNGE_TV.y, LOUNGE_TV.z)
     group.add(tv)
     // THE SCREEN HAS TWO STATES. Idle is the cool standby glow; the race feed switches on
     // while any driver is on a rig, driven from the scene's frame loop. The material is
     // allocated once and only its map/emissive are swapped, so nothing re-allocates per frame.
-    tvScreen = box(1.7, 0.9, 0.02, 0x24343c, { emissive: 0x2a4a5a, ei: 0.6 })
+    tvScreen = box(1.7, 0.9, 0.02, pal(0x24343c), { emissive: pal(0x2a4a5a), ei: 0.6 })
     tvScreen.position.set(LOUNGE_TV.x, LOUNGE_TV.y, LOUNGE_TV.z + 0.06)
     tvScreen.name = 'lounge-tv-screen'
     {
@@ -2749,16 +2750,16 @@ export function buildOffice(scene: THREE.Scene, hour: number) {
       const dg = new THREE.Group()
       dg.position.set(DARTBOARD.x, 0, DARTBOARD.z)
       // the surround backing, so the board is not a floating disc
-      const back = box(0.06, DARTBOARD.r * 2.4, DARTBOARD.r * 2.4, 0x1e2428, { rough: 0.7 })
+      const back = box(0.06, DARTBOARD.r * 2.4, DARTBOARD.r * 2.4, pal(0x1e2428), { rough: 0.7 })
       back.position.y = DARTBOARD.y
       dg.add(back)
       // the board face: concentric rings, dark and light, from the wall outward
       const rings: [number, number][] = [
-        [1.0, 0x14100c],
-        [0.62, 0xe8e0cc],
-        [0.42, 0x14100c],
-        [0.16, 0xe8c04a],
-        [0.07, 0xc23b2f],
+        [1.0, pal(0x14100c)],
+        [0.62, pal(0xe8e0cc)],
+        [0.42, pal(0x14100c)],
+        [0.16, pal(0xe8c04a)],
+        [0.07, pal(0xc23b2f)],
       ]
       for (const [frac, col] of rings) {
         const disc = cyl(DARTBOARD.r * frac, DARTBOARD.r * frac, 0.015, col, 24, 0.2)
@@ -2768,15 +2769,15 @@ export function buildOffice(scene: THREE.Scene, hour: number) {
         dg.add(disc)
       }
       // a small scoreboard above the board
-      const sb = box(0.03, 0.24, 0.4, 0x2a2f34, { rough: 0.6 })
+      const sb = box(0.03, 0.24, 0.4, pal(0x2a2f34), { rough: 0.6 })
       sb.position.set(-0.03, DARTBOARD.y + DARTBOARD.r + 0.34, 0)
       dg.add(sb)
-      const sbFace = box(0.005, 0.17, 0.32, 0x0b1418, { emissive: 0x224a3a, ei: 0.5 })
+      const sbFace = box(0.005, 0.17, 0.32, pal(0x0b1418), { emissive: pal(0x224a3a), ei: 0.5 })
       sbFace.position.set(-0.05, DARTBOARD.y + DARTBOARD.r + 0.34, 0)
       dg.add(sbFace)
       group.add(dg)
       // the oche line on the floor, so the throw position is legible
-      const oche = box(0.02, 0.004, 1.4, 0xc8b070, { rough: 0.6 })
+      const oche = box(0.02, 0.004, 1.4, pal(0xc8b070), { rough: 0.6 })
       oche.position.set(DART_THROW.x + 0.4, 0.008, DART_THROW.z)
       group.add(oche)
     }
@@ -2790,19 +2791,19 @@ export function buildOffice(scene: THREE.Scene, hour: number) {
       rg.position.set(rig.x, 0, rig.z)
       rg.rotation.y = rig.facing
       // the seat base + back + side bolsters, in a dark racing red
-      const seat = new THREE.Mesh(rbox(0.52, 0.12, 0.5, 0.04), stdMat(0x8f2f2f, { rough: 0.8 }))
+      const seat = new THREE.Mesh(rbox(0.52, 0.12, 0.5, 0.04), stdMat(pal(0x8f2f2f), { rough: 0.8 }))
       seat.position.y = RACING_SEAT_H
       rg.add(seat)
-      const back = new THREE.Mesh(rbox(0.52, 0.62, 0.12, 0.04), stdMat(0x8f2f2f, { rough: 0.8 }))
+      const back = new THREE.Mesh(rbox(0.52, 0.62, 0.12, 0.04), stdMat(pal(0x8f2f2f), { rough: 0.8 }))
       back.position.set(0, RACING_SEAT_H + 0.31, 0.24)
       rg.add(back)
       for (const bx of [-0.24, 0.24]) {
-        const bolster = new THREE.Mesh(rbox(0.07, 0.4, 0.42, 0.03), stdMat(0x7a2727, { rough: 0.8 }))
+        const bolster = new THREE.Mesh(rbox(0.07, 0.4, 0.42, 0.03), stdMat(pal(0x7a2727), { rough: 0.8 }))
         bolster.position.set(bx, RACING_SEAT_H + 0.1, 0.02)
         rg.add(bolster)
       }
       // the seat pedestal
-      const ped = cyl(0.06, 0.09, RACING_SEAT_H, 0x3a3f45, 10, 0.7)
+      const ped = cyl(0.06, 0.09, RACING_SEAT_H, pal(0x3a3f45), 10, 0.7)
       ped.position.y = RACING_SEAT_H / 2
       rg.add(ped)
       // ---- the wheel column, and the wheel that sits on its DRIVER-side end -----------
@@ -2829,7 +2830,7 @@ export function buildOffice(scene: THREE.Scene, hour: number) {
         y: COL_MID.y + Math.cos(COL_TILT) * (COL_LEN / 2),
         z: COL_MID.z + Math.sin(COL_TILT) * (COL_LEN / 2),
       }
-      const column = cyl(0.035, 0.035, COL_LEN, 0x3a3f45, 10, 0.7)
+      const column = cyl(0.035, 0.035, COL_LEN, pal(0x3a3f45), 10, 0.7)
       column.rotation.x = COL_TILT
       column.position.set(0, COL_MID.y, COL_MID.z)
       rg.add(column)
@@ -2837,35 +2838,35 @@ export function buildOffice(scene: THREE.Scene, hour: number) {
       // torus lies in its own XY plane with its axis along +Z, so `COL_TILT - PI/2` turns
       // that axis onto the column's — the wheel is perpendicular to the column, which is
       // what a real rack is, instead of lying across it.
-      const wheel = new THREE.Mesh(new THREE.TorusGeometry(0.16, 0.022, 8, 24), stdMat(0x1c1f24, { rough: 0.5 }))
+      const wheel = new THREE.Mesh(new THREE.TorusGeometry(0.16, 0.022, 8, 24), stdMat(pal(0x1c1f24), { rough: 0.5 }))
       wheel.rotation.x = COL_TILT - Math.PI / 2
       wheel.position.set(0, colTop.y, colTop.z)
       rg.add(wheel)
-      const hub = cyl(0.055, 0.055, 0.04, 0x2a2f34, 12, 0.5)
+      const hub = cyl(0.055, 0.055, 0.04, pal(0x2a2f34), 12, 0.5)
       hub.rotation.x = COL_TILT
       hub.position.set(0, colTop.y, colTop.z)
       rg.add(hub)
       // the pedal box, on the floor ahead
-      const pedals = box(0.34, 0.09, 0.26, 0x2a2f34, { metal: 0.4, rough: 0.5 })
+      const pedals = box(0.34, 0.09, 0.26, pal(0x2a2f34), { metal: 0.4, rough: 0.5 })
       pedals.position.set(0, 0.05, -1.02)
       rg.add(pedals)
       for (const px of [-0.09, 0.09]) {
-        const pad = box(0.1, 0.03, 0.14, 0x9aa2a8, { metal: 0.7, rough: 0.3 })
+        const pad = box(0.1, 0.03, 0.14, pal(0x9aa2a8), { metal: 0.7, rough: 0.3 })
         pad.position.set(px, 0.1, -1.0)
         rg.add(pad)
       }
       // the screen on a post, ahead of the wheel
-      const post = cyl(0.03, 0.03, 1.1, 0x3a3f45, 8, 0.7)
+      const post = cyl(0.03, 0.03, 1.1, pal(0x3a3f45), 8, 0.7)
       post.position.set(0, 0.55, -1.5)
       rg.add(post)
-      const scr = box(1.1, 0.62, 0.05, 0x1b2226, { metal: 0.3, rough: 0.3 })
+      const scr = box(1.1, 0.62, 0.05, pal(0x1b2226), { metal: 0.3, rough: 0.3 })
       scr.position.set(0, 1.24, -1.52)
       rg.add(scr)
-      const scrFace = box(1.02, 0.54, 0.02, 0x24343c, { emissive: 0x3a5a6a, ei: 0.7 })
+      const scrFace = box(1.02, 0.54, 0.02, pal(0x24343c), { emissive: pal(0x3a5a6a), ei: 0.7 })
       scrFace.position.set(0, 1.24, -1.49)
       rg.add(scrFace)
       // a floor mat, so the rig reads as a station rather than loose props
-      const mat = box(1.4, 0.01, 2.6, 0x24282c, { rough: 0.95 })
+      const mat = box(1.4, 0.01, 2.6, pal(0x24282c), { rough: 0.95 })
       mat.position.set(0, 0.006, -0.5)
       rg.add(mat)
       group.add(rg)
@@ -2897,10 +2898,10 @@ export function buildOffice(scene: THREE.Scene, hour: number) {
     // gutters: a channel each side (now either side in z), dropped below the boards, with an
     // outer wall so it reads as a channel rather than as a painted stripe
     for (const side of [-1, 1]) {
-      const floor = box(laneLen, 0.05, BOWLING.gutter, 0x4a5158, { rough: 0.55 })
+      const floor = box(laneLen, 0.05, BOWLING.gutter, pal(0x4a5158), { rough: 0.55 })
       floor.position.set(midX, -0.02, BOWLING.z + side * (halfW + BOWLING.gutter / 2))
       group.add(floor)
-      const wall = box(laneLen, 0.18, 0.05, 0x2b3138, { rough: 0.5 })
+      const wall = box(laneLen, 0.18, 0.05, pal(0x2b3138), { rough: 0.5 })
       wall.position.set(midX, -0.005, BOWLING.z + side * (halfW + BOWLING.gutter))
       group.add(wall)
     }
@@ -2908,22 +2909,22 @@ export function buildOffice(scene: THREE.Scene, hour: number) {
     // the approach, laid flush with the floor west of the foul line. Its depth is exactly the
     // lane plus its gutters: the lane's north edge is against the pantry wall, so an approach
     // any wider would disappear into that wall.
-    const approach = box(1.4, 0.024, BOWLING.w + 2 * BOWLING.gutter, 0x9a8266, { rough: 0.85 })
+    const approach = box(1.4, 0.024, BOWLING.w + 2 * BOWLING.gutter, pal(0x9a8266), { rough: 0.85 })
     approach.position.set(BOWLING.xFoul - 0.7, 0.006, BOWLING.z)
     group.add(approach)
 
     // the foul line, and the seven aiming arrows. The arrows stagger: the centre sits deepest,
     // which is the shape a real lane uses to point you at the pocket.
-    const foul = box(0.06, 0.014, BOWLING.w, 0x161c20, { rough: 0.6 })
+    const foul = box(0.06, 0.014, BOWLING.w, pal(0x161c20), { rough: 0.6 })
     foul.position.set(BOWLING.xFoul + 0.04, BOWLING.y + 0.007, BOWLING.z)
     group.add(foul)
     for (const az of [-0.28, -0.19, -0.09, 0, 0.09, 0.19, 0.28]) {
-      const arrow = box(0.1, 0.012, 0.035, 0x2b3138, { rough: 0.6 })
+      const arrow = box(0.1, 0.012, 0.035, pal(0x2b3138), { rough: 0.6 })
       arrow.position.set(BOWLING.xFoul + (4.9 - Math.abs(az) * 1.6), BOWLING.y + 0.006, BOWLING.z + az)
       group.add(arrow)
     }
     // a slightly darker deck under the pins, so the triangle is not floating on open boards
-    const deck = box(1.0, 0.014, BOWLING.w, 0x8a6a44, { rough: 0.5 })
+    const deck = box(1.0, 0.014, BOWLING.w, pal(0x8a6a44), { rough: 0.5 })
     deck.position.set(BOWLING.headPinX + 0.45, BOWLING.y + 0.005, BOWLING.z)
     group.add(deck)
 
@@ -2937,18 +2938,18 @@ export function buildOffice(scene: THREE.Scene, hour: number) {
         BOWLING.z + across * BOWLING.pinSpacing,
       )
       // body: fat at the belly, tapered to the neck
-      const body = cyl(PIN_R * 0.6, PIN_R, PIN_H * 0.72, 0xf4f1e8, 12, 0)
+      const body = cyl(PIN_R * 0.6, PIN_R, PIN_H * 0.72, pal(0xf4f1e8), 12, 0)
       body.position.y = PIN_H * 0.36
       pin.add(body)
-      const neck = cyl(PIN_R * 0.26, PIN_R * 0.6, PIN_H * 0.16, 0xf4f1e8, 12, 0)
+      const neck = cyl(PIN_R * 0.26, PIN_R * 0.6, PIN_H * 0.16, pal(0xf4f1e8), 12, 0)
       neck.position.y = PIN_H * 0.72 + PIN_H * 0.08
       pin.add(neck)
-      const head = new THREE.Mesh(new THREE.SphereGeometry(PIN_R * 0.3, 12, 10), stdMat(0xf4f1e8, { rough: 0.42 }))
+      const head = new THREE.Mesh(new THREE.SphereGeometry(PIN_R * 0.3, 12, 10), stdMat(pal(0xf4f1e8), { rough: 0.42 }))
       head.position.y = PIN_H * 0.88 + PIN_R * 0.2
       pin.add(head)
       // the two red neck rings — what makes ten white sticks read as tenpins
       for (const ry of [PIN_H * 0.62, PIN_H * 0.7]) {
-        const ring = cyl(PIN_R * 0.62, PIN_R * 0.62, 0.012, 0xc0392b, 14, 0)
+        const ring = cyl(PIN_R * 0.62, PIN_R * 0.62, 0.012, pal(0xc0392b), 14, 0)
         ring.position.y = ry
         pin.add(ring)
       }
@@ -2959,16 +2960,16 @@ export function buildOffice(scene: THREE.Scene, hour: number) {
     // the south of the room stays clear
     const retX = BOWLING.xFoul - 0.1
     const retZ = BOWLING.z - (halfW + BOWLING.gutter + 0.36)
-    const retBody = box(1.9, 0.9, 0.34, 0x2b3138, { metal: 0.35, rough: 0.45 })
+    const retBody = box(1.9, 0.9, 0.34, pal(0x2b3138), { metal: 0.35, rough: 0.45 })
     retBody.position.set(retX, 0.45, retZ)
     group.add(retBody)
-    const retRail = box(1.9, 0.07, 0.32, 0x3d454d, { metal: 0.6, rough: 0.3 })
+    const retRail = box(1.9, 0.07, 0.32, pal(0x3d454d), { metal: 0.6, rough: 0.3 })
     retRail.position.set(retX, 0.935, retZ)
     group.add(retRail)
     for (const [i, rx] of [-0.56, 0, 0.56].entries()) {
       const ball = new THREE.Mesh(
         new THREE.SphereGeometry(BALL_R, 16, 12),
-        stdMat([0x1d3f8f, 0xb03030, 0x2f7f4f][i], { rough: 0.3 }),
+        stdMat([pal(0x1d3f8f), pal(0xb03030), pal(0x2f7f4f)][i], { rough: 0.3 }),
       )
       ball.position.set(retX + rx, 0.97 + BALL_R, retZ)
       group.add(ball)
@@ -2980,34 +2981,35 @@ export function buildOffice(scene: THREE.Scene, hour: number) {
     const scrY = BOWLING.y + 1.9
     const scrX = BOWLING.xEnd + 0.34
     for (const side of [-1, 1]) {
-      const post = cyl(0.04, 0.04, scrY, 0x2b3138, 8, 0.6)
+      const post = cyl(0.04, 0.04, scrY, pal(0x2b3138), 8, 0.6)
       post.position.set(scrX - 0.08, scrY / 2, BOWLING.z + side * 0.55)
       group.add(post)
     }
-    const scrBody = box(0.06, 0.52, 1.3, 0x141a1f, { metal: 0.3, rough: 0.35 })
+    const scrBody = box(0.06, 0.52, 1.3, pal(0x141a1f), { metal: 0.3, rough: 0.35 })
     scrBody.position.set(scrX, scrY, BOWLING.z)
     group.add(scrBody)
-    const scrFace = box(0.02, 0.44, 1.2, 0x0e1620, { emissive: 0x2a5a8a, ei: 0.55 })
+    const scrFace = box(0.02, 0.44, 1.2, pal(0x0e1620), { emissive: pal(0x2a5a8a), ei: 0.55 })
     scrFace.position.set(scrX - 0.04, scrY, BOWLING.z)
     group.add(scrFace)
   }
 
   /* ------------------------------------------------------------ lighting -- */
-  scene.add(new THREE.AmbientLight(0xffffff, 0.24))
-  const sun = new THREE.DirectionalLight(0xfff4e2, 2.6)
+  const ambient = new THREE.AmbientLight(LIGHTS.ambient.color, LIGHTS.ambient.day)
+  scene.add(ambient)
+  const sun = new THREE.DirectionalLight(LIGHTS.sun.day.color, LIGHTS.sun.day.intensity)
   sun.position.set(30, 24, 18)
   scene.add(sun)
-  const fill = new THREE.HemisphereLight(0xdfeaf7, 0x8a7a5f, 0.45)
+  const fill = new THREE.HemisphereLight(LIGHTS.hemi.sky, LIGHTS.hemi.ground, LIGHTS.hemi.day)
   scene.add(fill)
 
   /* -------------------------------------------------- outside environment -- */
   const streetGroup = new THREE.Group()
   scene.add(streetGroup)
 
-  const asphaltTex = track(asphaltTexture('#5a5f63', '#8b9095'))
+  const asphaltTex = track(asphaltTexture(palCss('#5a5f63'), palCss('#8b9095')))
   asphaltTex.repeat.set(24, 3)
-  const pavementTex = track(pavementTexture('#9aa0a4', '#7f868b'))
-  const earthTex = track(earthTexture('#6b7a56', '#4d5a3e', '#8a9a6c'))
+  const pavementTex = track(pavementTexture(palCss('#9aa0a4'), palCss('#7f868b')))
+  const earthTex = track(earthTexture(palCss('#6b7a56'), palCss('#4d5a3e'), palCss('#8a9a6c')))
   earthTex.repeat.set(18, 18)
   const earthBump = track(bumpFrom(earthTex, 0.55))
   const asphaltBump = track(bumpFrom(asphaltTex, 0.7))
@@ -3016,7 +3018,7 @@ export function buildOffice(scene: THREE.Scene, hour: number) {
   const GROUND_EXTENT = 220
   const earth = new THREE.Mesh(
     new THREE.PlaneGeometry(GROUND_EXTENT, GROUND_EXTENT),
-    new THREE.MeshStandardMaterial({ color: 0x6f7a5e, map: earthTex, bumpMap: earthBump, bumpScale: 0.5, roughness: 1 }),
+    new THREE.MeshStandardMaterial({ color: pal(0x6f7a5e), map: earthTex, bumpMap: earthBump, bumpScale: 0.5, roughness: 1 }),
   )
   earth.rotation.x = -Math.PI / 2
   earth.position.y = -0.12
@@ -3040,7 +3042,7 @@ export function buildOffice(scene: THREE.Scene, hour: number) {
   road.position.set(0, -0.05, HALF_D + 14)
   streetGroup.add(road)
   for (let i = -10; i <= 10; i++) {
-    const dash = new THREE.Mesh(new THREE.PlaneGeometry(3, 0.18), stdMat(0xd8d2b8, { rough: 0.9 }))
+    const dash = new THREE.Mesh(new THREE.PlaneGeometry(3, 0.18), stdMat(pal(0xd8d2b8), { rough: 0.9 }))
     dash.rotation.x = -Math.PI / 2
     dash.position.set(i * 7, -0.04, HALF_D + 14)
     streetGroup.add(dash)
@@ -3050,10 +3052,10 @@ export function buildOffice(scene: THREE.Scene, hour: number) {
   const tree = (x: number, z: number, scale = 1) => {
     const t = new THREE.Group()
     t.position.set(x, 0, z)
-    const trunk = cyl(0.14 * scale, 0.2 * scale, 2.0 * scale, 0x6b5138, 8)
+    const trunk = cyl(0.14 * scale, 0.2 * scale, 2.0 * scale, pal(0x6b5138), 8)
     trunk.position.y = 1.0 * scale
     t.add(trunk)
-    const canopyMat = stdMat(0x4f8b55, { rough: 0.9 })
+    const canopyMat = stdMat(pal(0x4f8b55), { rough: 0.9 })
     for (const [ox, oy, oz, r] of [
       [0, 2.4, 0, 1.05],
       [0.5, 2.0, 0.3, 0.75],
@@ -3074,22 +3076,22 @@ export function buildOffice(scene: THREE.Scene, hour: number) {
     tree(tx, tz, 1.3)
   }
 
-  const kerb = box(FLOOR.width + 40, 0.12, 0.3, 0xb9bec2, { rough: 0.9 })
+  const kerb = box(FLOOR.width + 40, 0.12, 0.3, pal(0xb9bec2), { rough: 0.9 })
   kerb.position.set(0, -0.02, HALF_D + 9.2)
   streetGroup.add(kerb)
 
   for (const lx of [-20, 20]) {
     const lampZ = HALF_D + 6.4
-    const post = cyl(0.07, 0.09, 5.4, 0x6d7378, 8, 0.5)
+    const post = cyl(0.07, 0.09, 5.4, pal(0x6d7378), 8, 0.5)
     post.position.set(lx, 2.7, lampZ)
     streetGroup.add(post)
-    const arm = box(0.14, 0.1, 1.2, 0x6d7378, { metal: 0.5 })
+    const arm = box(0.14, 0.1, 1.2, pal(0x6d7378), { metal: 0.5 })
     arm.position.set(lx, 5.3, lampZ + 0.5)
     streetGroup.add(arm)
-    const head = box(0.6, 0.14, 0.34, 0x6d7378, { metal: 0.5 })
+    const head = box(0.6, 0.14, 0.34, pal(0x6d7378), { metal: 0.5 })
     head.position.set(lx, 5.24, lampZ + 1.05)
     streetGroup.add(head)
-    const lamp = new THREE.PointLight(0xfff0cf, hour >= 18 || hour < 6 ? 1.0 : 0.1, 18)
+    const lamp = new THREE.PointLight(LIGHTS.street.color, hour >= 18 || hour < 6 ? LIGHTS.street.night : LIGHTS.street.day, 18)
     lamp.position.set(lx, 5.05, lampZ + 1.05)
     streetGroup.add(lamp)
   }
@@ -3114,14 +3116,14 @@ export function buildOffice(scene: THREE.Scene, hour: number) {
     const body = box(0.34, 0.62, 0.22, color, { rough: 0.8 })
     body.position.y = 1.05
     g.add(body)
-    const head = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.26, 0.24), stdMat(0xe4b48c, { rough: 0.85 }))
+    const head = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.26, 0.24), stdMat(pal(0xe4b48c), { rough: 0.85 }))
     head.position.y = 1.5
     g.add(head)
     const legs: THREE.Object3D[] = []
     for (const side of [-1, 1]) {
       const hip = new THREE.Group()
       hip.position.set(side * 0.09, 0.74, 0)
-      const leg = box(0.12, 0.72, 0.12, 0x39424b)
+      const leg = box(0.12, 0.72, 0.12, pal(0x39424b))
       leg.position.y = -0.36
       hip.add(leg)
       g.add(hip)
@@ -3141,7 +3143,7 @@ export function buildOffice(scene: THREE.Scene, hour: number) {
     return { g, legs }
   }
 
-  const PED_COLORS = [0xc9553f, 0x3f6fc9, 0x4f9a63, 0xd8a83f, 0x8a5fc9, 0x3fa8a8]
+  const PED_COLORS = [pal(0xc9553f), pal(0x3f6fc9), pal(0x4f9a63), pal(0xd8a83f), pal(0x8a5fc9), pal(0x3fa8a8)]
   for (let i = 0; i < 6; i++) {
     const { g, legs } = makeWalker(PED_COLORS[i % PED_COLORS.length])
     const row = i % 2
@@ -3157,7 +3159,7 @@ export function buildOffice(scene: THREE.Scene, hour: number) {
     const body = box(4.0, 0.85, 1.8, color, { metal: 0.45, rough: 0.35 })
     body.position.y = 0.75
     c.add(body)
-    const cabin = box(2.1, 0.65, 1.65, 0x9fb2bd, { metal: 0.3, rough: 0.2 })
+    const cabin = box(2.1, 0.65, 1.65, pal(0x9fb2bd), { metal: 0.3, rough: 0.2 })
     cabin.position.set(-0.15, 1.45, 0)
     c.add(cabin)
     for (const [wx, wz] of [
@@ -3166,7 +3168,7 @@ export function buildOffice(scene: THREE.Scene, hour: number) {
       [-1.3, -0.9],
       [1.3, -0.9],
     ]) {
-      const wheel = cyl(0.34, 0.34, 0.22, 0x24282b, 12, 0.2)
+      const wheel = cyl(0.34, 0.34, 0.22, pal(0x24282b), 12, 0.2)
       wheel.rotation.z = Math.PI / 2
       wheel.position.set(wx, 0.34, wz)
       c.add(wheel)
@@ -3174,7 +3176,7 @@ export function buildOffice(scene: THREE.Scene, hour: number) {
     for (const hx of [-2.0, 2.0]) {
       const lamp = new THREE.Mesh(
         new THREE.BoxGeometry(0.12, 0.16, 0.3),
-        stdMat(0xfff0cc, { emissive: 0xffe0a0, ei: 0.8 }),
+        stdMat(pal(0xfff0cc), { emissive: pal(0xffe0a0), ei: 0.8 }),
       )
       lamp.position.set(hx, 0.85, 0)
       c.add(lamp)
@@ -3184,7 +3186,7 @@ export function buildOffice(scene: THREE.Scene, hour: number) {
 
   const LANE_NORTH = HALF_D + 11.5
   const LANE_SOUTH = HALF_D + 15.5
-  const CAR_COLORS = [0xb9563f, 0x3f6fb9, 0xd8d3c4, 0x4f7a5f, 0x8a8f95]
+  const CAR_COLORS = [pal(0xb9563f), pal(0x3f6fb9), pal(0xd8d3c4), pal(0x4f7a5f), pal(0x8a8f95)]
   const LANE_SPEED = { [LANE_NORTH]: 7, [LANE_SOUTH]: 9 } as Record<number, number>
   const perLane = [0, 0]
   for (let i = 0; i < 5; i++) {
@@ -3250,20 +3252,22 @@ export function buildOffice(scene: THREE.Scene, hour: number) {
 
   /* ---------------------------------------------------------- apply state -- */
   function applyPalette(h: number) {
-    pal = paletteFor(h)
+    roomPal = paletteFor(h)
     const night = h >= 18 || h < 6
-    sun.intensity = night ? 1.2 : 2.6
-    sun.color.setHex(night ? 0xc9d8ee : 0xfff4e2)
-    fill.intensity = night ? 0.35 : 0.45
-    for (const l of lamps) l.intensity = night ? 0.85 : 0.25
-    for (const s of streaks) (s.material as THREE.MeshStandardMaterial).emissiveIntensity = night ? 1.5 : 0.85
+    const sunSet = night ? LIGHTS.sun.night : LIGHTS.sun.day
+    sun.intensity = sunSet.intensity
+    sun.color.setHex(sunSet.color)
+    ambient.intensity = night ? LIGHTS.ambient.night : LIGHTS.ambient.day
+    fill.intensity = night ? LIGHTS.hemi.night : LIGHTS.hemi.day
+    for (const l of lamps) l.intensity = night ? LIGHTS.deskLamp.night : LIGHTS.deskLamp.day
+    for (const s of streaks) (s.material as THREE.MeshStandardMaterial).emissiveIntensity = night ? GLOW.strip.night : GLOW.strip.day
   }
 
   function dispose() {
     for (const d of disposables) d.dispose()
   }
 
-  void pal
+  void roomPal
   void panelMat
   void goldMat
   void CEILING_Y
