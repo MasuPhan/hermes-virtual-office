@@ -16,6 +16,7 @@
 /* ------------------------------------------------------------------ OXMODE --
  * Brand reference (oxmode.ai): bg #050117 / #08021c / #110337 / #1a0450 / #240568,
  * brand violet #380995, violet #6d45e0 / #8e70f5, cyan #2efcff (light #6cf8ff).
+ * Rule: neutral, readable base; brand colours only on accents (screens, LEDs, signage).
  */
 
 type Hsl = [number, number, number]
@@ -37,45 +38,28 @@ function fromHsl(h: number, s: number, l: number): number {
 }
 
 /**
- * Re-skin rule for prop colours that have no explicit entry below:
- *  - neutrals (whites, greys, steel, black)  -> indigo/violet ramp, darker overall
- *  - warm browns / woods / tans               -> deep plum
- *  - greens (plants, grass)                    -> deep teal-green
- *  - saturated blues (water)                   -> cyan; soft blues (fabric) -> lavender
- *  - saturated warm accents, reds, purples     -> kept (fire, darts, pins, LEDs, cars)
+ * Re-skin rule for prop colours that have no explicit entry below. Readability first:
+ * the legacy palette keeps its value contrast (walls / floors / furniture / outdoor), so
+ * colours stay as they were; only near-greys get a slight cool (blue-grey) tint toward the
+ * brand. Brand violet/cyan never washes large surfaces — it lives in OVERRIDES (accents).
  */
 function reskin(hex: number): number {
   const [h, s, l] = toHsl(hex)
-  if (s < 0.2 || l < 0.06) return fromHsl(266, 0.34 + 0.1 * (1 - l), 0.06 + 0.34 * l)
-  if (h >= 15 && h < 55 && !(s > 0.6 && l > 0.42)) return fromHsl(285, Math.min(0.42, s * 0.75), 0.06 + 0.4 * l)
-  if (h >= 55 && h < 170 && !(s > 0.6 && l > 0.55)) return fromHsl(165, Math.min(0.55, s), 0.07 + 0.4 * l)
-  if (h >= 170 && h < 250) return s > 0.45 ? fromHsl(186, 0.85, 0.12 + 0.42 * l) : fromHsl(250, 0.42, 0.1 + 0.48 * l)
+  if (s < 0.1 && l > 0.04 && l < 0.97) return fromHsl(s < 0.02 ? 215 : h * 0.4 + 215 * 0.6, s + 0.05, l)
   return hex
 }
 
-/** Explicit picks where the rule would read wrong. Key = legacy colour. */
+/** Accent picks: screens, LEDs, signage. Key = legacy colour. */
 const OVERRIDES: [number, number][] = [
-  [0xc9a24a, 0x2efcff], // gold trim / plaque border -> brand cyan
-  [0xe8cf8a, 0xeaeef7], // plaque text
-  [0xa89a72, 0x8e70f5], // plaque sub text
-  [0x2a1f16, 0x0b0326], // plaque / name plate panel
-  [0xe4b48c, 0xe4b48c], // pedestrian skin stays skin
-  [0xe8edf1, 0xc4b5fd], // bbq smoke -> lavender haze
-  [0xf7f8f6, 0xe6dcff], // whiteboard surface stays readable
-  [0xf4f4ee, 0xe6dcff], // wall board surface
+  [0xc9a24a, 0x2efcff], // gold trim / plaque border -> brand cyan (signage)
+  [0xa89a72, 0x8e70f5], // plaque sub text -> violet
+  [0x2a1f16, 0x110337], // plaque / name plate panel -> deep brand
   [0x2a4a5a, 0x6d45e0], // TV standby glow -> violet
   [0x3a5a6a, 0x2efcff], // racing-rig screen glow
   [0x2a5a8a, 0x2efcff], // bowling score screen glow
   [0x0d1c28, 0x380995], // wall TV standby glow
   [0x224a3a, 0x2efcff], // dart scoreboard glow
   [0x4ad07a, 0x2efcff], // server status LEDs
-  // outside: street, pavement, earth and kerb sit darker than the building
-  [0x5a5f63, 0x140a33], [0x8b9095, 0x1f1250], // asphalt base / grit
-  [0x9aa0a4, 0x241660], [0x7f868b, 0x1a0f45], // pavement base / joint
-  [0x6b7a56, 0x1b1640], [0x4d5a3e, 0x120e30], [0x8a9a6c, 0x241d52], // earth
-  [0x6f7a5e, 0x2a2260], // earth material tint
-  [0xb9bec2, 0x3a2a86], // kerb
-  [0xd8d2b8, 0x6cf8ff], // road dashes -> cyan
 ]
 
 const PROP_MAP = new Map<number, number>(OVERRIDES)
@@ -98,65 +82,63 @@ export function palCss(css: string): string {
   return `#${out.toString(16).padStart(6, '0')}`
 }
 
-/** Background gradient stops, top → bottom (equirect). Day = lavender daylight, night = nebula. */
+/** Background gradient stops, top → bottom (equirect). Day = natural, slightly cool; night = blue-black. */
 export const SKY = {
-  day: ['#8b6cf0', '#b3a0f7', '#d9ccfc', '#efe9ff'] as [string, string, string, string],
-  night: ['#050117', '#0d0330', '#1f0763', '#380995'] as [string, string, string, string],
+  day: ['#93bde6', '#bfd7ee', '#dfeaf5', '#eef3f8'] as [string, string, string, string],
+  night: ['#03050b', '#070b15', '#0d1422', '#172131'] as [string, string, string, string],
   /** star points, night only */
   stars: { color: 0xeaeef7, count: 1400, size: 1.6, radius: 300 },
 }
 
-export const FOG = { day: 0xcfc2fb, night: 0x14043f, near: 70, far: 210 }
+export const FOG = { day: 0xd3e1ee, night: 0x101826, near: 80, far: 220 }
 
 /** Reflection environment (PMREM source): gradient stops + soft light panels. */
 export const ENV = {
   stops: [
-    [0, '#d9ccfc'],
-    [0.42, '#8e70f5'],
-    [0.5, '#e6dcff'],
-    [0.62, '#2a1466'],
-    [1, '#08021c'],
+    [0, '#dfeeff'],
+    [0.42, '#bcd3e8'],
+    [0.5, '#eee9df'],
+    [0.62, '#5f6266'],
+    [1, '#1e2024'],
   ] as [number, string][],
   panelCore: '#ffffff',
-  panelMid: 'rgba(108,248,255,0.85)',
-  panelEdge: 'rgba(108,248,255,0)',
+  panelMid: 'rgba(246,248,250,0.85)',
+  panelEdge: 'rgba(246,248,250,0)',
 }
 
-export const RENDER = { exposure: 1.05 }
+export const RENDER = { exposure: 1.1 }
 
 /** Light colours/intensities. `day`/`night` pairs are applied by build.ts `applyPalette`. */
 export const LIGHTS = {
-  ambient: { color: 0xe6dcff, day: 0.4, night: 0.3 },
-  sun: { day: { color: 0xf3ecff, intensity: 2.6 }, night: { color: 0x8e70f5, intensity: 1.0 } },
-  hemi: { sky: 0xc9b8fa, ground: 0x2a1466, day: 0.65, night: 0.45 },
-  /** ceiling light panels' point lights */
-  ceiling: { color: 0x6cf8ff, intensity: 0.6 },
+  ambient: { color: 0xffffff, day: 0.26, night: 0.2 },
+  sun: { day: { color: 0xfff6ea, intensity: 2.6 }, night: { color: 0x9fb2d6, intensity: 0.6 } },
+  hemi: { sky: 0xdfe9f5, ground: 0x7d7566, day: 0.45, night: 0.3 },
+  /** ceiling light panels' point lights: warm-neutral so rooms read at night */
+  ceiling: { color: 0xfff1e0, intensity: 1.0 },
   /** desk lamps (point light) */
-  deskLamp: { color: 0x2efcff, initDay: 0.15, initNight: 0.7, day: 0.25, night: 1.1 },
-  street: { color: 0x8e70f5, day: 0.1, night: 1.6 },
+  deskLamp: { color: 0xffdcae, initDay: 0.12, initNight: 0.6, day: 0.25, night: 0.95 },
+  street: { color: 0xffeccc, day: 0.1, night: 1.1 },
   bbq: { color: 0xff7a2e, intensity: 0.5 },
 }
 
-/** Emissive "glow" sources. Brand cyan = the "working" colour. */
+/** Emissive "glow" sources. Brand cyan = the "working" colour, on screens only. */
 export const GLOW = {
   /** desk / exec monitors; scene.ts drives the intensity from the occupant's status */
-  monitor: { emissive: 0x2efcff, ei: 0.35, review: 1.0, working: 1.6 },
-  /** ceiling light strips (the `streaks`) */
-  strip: { color: 0xb8fbff, emissive: 0x2efcff, ei: 1, day: 0.7, night: 1.8 },
+  monitor: { emissive: 0x2efcff, ei: 0.3, review: 0.9, working: 1.5 },
+  /** ceiling light strips (the `streaks`): white panel with a faint cyan cast, brighter at night */
+  strip: { color: 0xffffff, emissive: 0xe6fdff, ei: 1, day: 0.85, night: 1.9 },
   /** desk lamp shade */
-  lampShade: { color: 0x1a0450, emissive: 0x2efcff, day: 0.4, night: 1.4 },
+  lampShade: { color: 0xf0e2c4, emissive: 0xffd89a, day: 0.2, night: 0.9 },
 }
 
-/** Shared PBR material colours (materials.ts). */
+/** Shared PBR material colours (materials.ts). Legacy values, neutrals cooled slightly. */
 export const MAT = {
-  /** floor: dark glossy indigo tile with a faint cyan grid */
-  marble: { base: '#1a0f45', veinA: '#2a1a66', veinB: '#24165a', grout: '#1f8fb8', roughness: 0.12, metalness: 0.4, env: 1.4 },
-  wood: { base: '#2a1660', grainA: '#1f0f4a', grainB: '#3a2380' },
-  glass: { color: 0xb9a6ff, opacity: 0.35 },
-  stone: { base: '#2a2450', specA: '#1f1a40', specB: '#3a3366' },
-  plaster: 0x3a2880,
-  /** feature walls: brand violet with cyan seams */
-  panelDark: { base: '#1a0450', seam: '#2efcff', grainA: '#240568', grainB: '#110337' },
-  carpet: { base: '#140a3a', fiberA: '#1f1050', fiberB: '#2a1766' },
+  marble: { base: '#e9e8e3', veinA: '#c3c4c0', veinB: '#d3d3cf', grout: '#b2b3b0', roughness: 0.08, metalness: 0.35, env: 1.6 },
+  wood: { base: '#9a7449', grainA: '#7d5c36', grainB: '#b08a5c' },
+  glass: { color: 0xd6e6f0, opacity: 0.5 },
+  stone: { base: '#6c7782', specA: '#56606b', specB: '#89939d' },
+  plaster: 0xf0f2f5,
+  panelDark: { base: '#3a2b1e', seam: '#2a1e14', grainA: '#4a3728', grainB: '#2e2116' },
+  carpet: { base: '#878d95', fiberA: '#6c7179', fiberB: '#a0a5ad' },
   accent: { color: 0x2efcff, metalness: 0.6, roughness: 0.25 },
 }
