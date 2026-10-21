@@ -13,6 +13,10 @@ import type { AgentDivision } from '@/types/hermes'
 export type AvatarKind = 'dummy' | 'agent'
 
 export type AvatarState = {
+  displayName?: string
+  divisionOverride?: AgentDivision
+  roleLabel?: string
+  useHermesDivision: boolean
   avatarId: string
   name: string
   division: AgentDivision
@@ -36,4 +40,11 @@ export type AvatarState = {
 }
 
 /** Everything needed to write one avatar back to the DB. */
-export type AvatarWrite = Omit<AvatarState, 'updatedAt'>
+export type AvatarWrite = Omit<AvatarState, 'updatedAt' | 'useHermesDivision'> & { useHermesDivision?: boolean }
+
+/** Office-only presentation; never changes a Hermes profile or task assignment. */
+export type AvatarDisplay = Pick<AvatarState, 'displayName' | 'divisionOverride' | 'roleLabel' | 'useHermesDivision'>
+
+export function officeDivision(row: AvatarDisplay, division: AgentDivision | null | undefined): AgentDivision {
+  return (row.useHermesDivision !== false ? division : row.divisionOverride ?? division) ?? 'exec'
+}

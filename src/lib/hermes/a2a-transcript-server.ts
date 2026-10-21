@@ -21,6 +21,7 @@ import { readdir, readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { promisify } from 'node:util'
 import { hermesHome } from './kanban'
+import { fleetRootEnv } from './root'
 import {
   dedupeCtxMessages,
   parseCaller,
@@ -44,7 +45,7 @@ const MAX_TEXT = 4000
 const OUTBOUND_SCAN = 400
 
 function cleanEnv(): NodeJS.ProcessEnv {
-  const env = { ...process.env }
+  const env = fleetRootEnv(process.env)
   for (const k of [
     'HERMES_DELEGATED_CHILD_CONTEXT',
     'HERMES_SUPERVISED_CHILD',
@@ -184,8 +185,8 @@ function fromSession(agent: string, doc: ExportDoc): { conv: A2aConversation | n
   for (const m of raw.slice(-OUTBOUND_SCAN)) {
     for (const c of toolCallsOf(m)) {
       if (c.name !== 'a2a_call' && c.name !== 'a2a_orchestrate') continue
-      const peer = argOf(c.args, 'agent', 'agents', 'peer') || '(tak tercatat)'
-      const task = argOf(c.args, 'task', 'message', 'prompt') || '(tak tercatat)'
+      const peer = argOf(c.args, 'agent', 'agents', 'peer') || '(không được ghi lại)'
+      const task = argOf(c.args, 'task', 'message', 'prompt') || '(không được ghi lại)'
       outbound.push({ agent, peer, task: short(task, 300), result: '', at: null })
     }
     if (m.role !== 'user' && m.role !== 'assistant') continue

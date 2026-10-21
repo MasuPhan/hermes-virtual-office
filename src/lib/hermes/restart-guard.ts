@@ -36,17 +36,17 @@ export type RunningReadout =
 export function restartBlockMessage(count: number): string {
   if (!Number.isFinite(count) || count <= 0) return ''
   return (
-    `${count} card sedang dikerjakan — restart akan membunuh worker-nya, ` +
-    `dan pekerjaan yang belum dikomit akan hilang.`
+    `${count} thẻ đang được xử lý — khởi động lại sẽ chấm dứt worker, ` +
+    `và công việc chưa commit sẽ bị mất.`
   )
 }
 
 /** Kalimat jujur saat board tak terbaca — jangan mewakili operator. */
 export function restartUnknownMessage(error: string): string {
-  const why = error.trim().slice(0, 200) || 'sebab tidak diketahui'
+  const why = error.trim().slice(0, 200) || 'không rõ nguyên nhân'
   return (
-    `Daftar card berjalan tidak bisa dibaca (${why}) — tidak bisa dipastikan ` +
-    `ada pekerjaan berjalan atau tidak. Minta konfirmasi eksplisit sebelum restart.`
+    `Không thể đọc danh sách thẻ đang chạy (${why}) — không thể xác định ` +
+    `có công việc đang chạy hay không. Yêu cầu xác nhận rõ ràng trước khi khởi động lại.`
   )
 }
 

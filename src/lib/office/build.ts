@@ -379,7 +379,7 @@ function racingFeedTexture() {
   c.font = 'bold 30px ui-monospace, monospace'
   c.textAlign = 'left'
   c.fillStyle = '#7ef0a8'
-  c.fillText('LAP 3/5', 18, 288 - 24)
+  c.fillText('VÒNG 3/5', 18, 288 - 24)
   c.textAlign = 'right'
   c.fillStyle = '#ffd45e'
   c.fillText('248 KM/H', 494, 288 - 24)
@@ -2542,7 +2542,7 @@ export function buildOffice(scene: THREE.Scene, hour: number) {
     namePlate.position.set(DOOR.x, 3.5, HALF_D + 0.08)
     namePlate.name = 'office-name-plate'
     group.add(namePlate)
-    const nameMat = new THREE.MeshStandardMaterial({ map: signTexture('HERMES OFFICE'), roughness: 0.55 })
+    const nameMat = new THREE.MeshStandardMaterial({ map: signTexture('VĂN PHÒNG HERMES'), roughness: 0.55 })
     const nameFace = new THREE.Mesh(new THREE.PlaneGeometry(6.0, 0.8), nameMat)
     nameFace.position.set(DOOR.x, 3.5, HALF_D + 0.15)
     nameFace.name = 'office-name-face'

@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { assertLocalWriteRequest } from '@/lib/local-guard'
+import { assertApiRequest } from '@/lib/api-policy'
 import {
   ACTION_EFFECT,
-  ESTOP_PATH,
   agentPermissionSummary,
   checkAction,
+  estopPath,
   readPause,
   type ActionKind,
   type ActionRequest,
@@ -34,23 +34,33 @@ export const dynamic = 'force-dynamic'
  *   3. Balasannya menyebut APA YANG TERJADI, bukan cuma "ok". Aksi yang tidak bisa dilaporkan
  *      hasilnya akan ditekan lagi oleh operator.
  */
-export async function GET() {
-  return NextResponse.json({
-    pause: readPause(),
-    estopPath: ESTOP_PATH,
-    actions: ACTION_EFFECT,
-    audit: readAudit(30),
-    /** Batas izin per role agent (TAHAP 5.4), dari tabel tunggal di control.ts. */
-    agentPermissions: agentPermissionSummary(),
-  })
+export async function GET(req: NextRequest) {
+  const denied = assertApiRequest(req, 'read')
+  if (denied) return denied
+  try {
+    return NextResponse.json({
+      pause: readPause(),
+      estopPath: estopPath(),
+      actions: ACTION_EFFECT,
+      audit: readAudit(30),
+      /** Batas izin per role agent (TAHAP 5.4), dari tabel tunggal di control.ts. */
+      agentPermissions: agentPermissionSummary(),
+    })
+  } catch (err) {
+    return NextResponse.json(
+      { error: { code: 'control_failed', message: (err as Error).message, status: 503 } },
+      { status: 503 },
+    )
+  }
 }
 
 const KINDS: ActionKind[] = ['pauseAll', 'resumeAll', 'unblock', 'promote', 'release', 'setFallback']
 
 export async function POST(req: NextRequest) {
-  // Sama seperti semua tulis lain di proyek ini: hanya dari host ini. Tombol yang menghentikan
-  // kerja tidak boleh bisa ditekan dari jaringan luar.
-  const guard = assertLocalWriteRequest(req)
+  // Control can pause the whole install, release workers or replace the fallback
+  // chain; the whole endpoint is privileged (management write + explicit
+  // HVO_ALLOW_PRIVILEGED=1).
+  const guard = assertApiRequest(req, 'privileged')
   if (guard) return guard
 
   let body: ActionRequest & { steer?: string }
@@ -58,14 +68,14 @@ export async function POST(req: NextRequest) {
     body = (await req.json()) as ActionRequest & { steer?: string }
   } catch {
     return NextResponse.json(
-      { error: { code: 'invalid_request', message: 'body bukan JSON', status: 400 } },
+      { error: { code: 'invalid_request', message: 'body không phải JSON', status: 400 } },
       { status: 400 },
     )
   }
 
   if (!KINDS.includes(body.action)) {
     return NextResponse.json(
-      { error: { code: 'invalid_request', message: `aksi "${body.action}" tidak dikenal`, status: 400 } },
+      { error: { code: 'invalid_request', message: `Thao tác "${body.action}" không xác định`, status: 400 } },
       { status: 400 },
     )
   }
@@ -99,7 +109,7 @@ export async function POST(req: NextRequest) {
     taskId: body.taskId,
     reason: (body.reason || '').slice(0, 300),
     effect: body.steer
-      ? 'mengirim arahan ke worker yang sedang jalan'
+      ? 'Gửi chỉ dẫn cho worker đang chạy'
       : ACTION_EFFECT[body.action]?.effect || '',
   })
 
@@ -109,36 +119,36 @@ export async function POST(req: NextRequest) {
     if (body.steer) {
       if (!body.taskId) {
         return NextResponse.json(
-          { error: { code: 'invalid_request', message: 'steer butuh id task', status: 400 } },
+          { error: { code: 'invalid_request', message: 'steer cần ID công việc', status: 400 } },
           { status: 400 },
         )
       }
       await steerTask(body.taskId, body.steer)
-      audit.finish(`arahan dikirim ke ${body.taskId}`, true)
-      return NextResponse.json({ ok: true, did: `arahan dikirim ke ${body.taskId}`, pause: readPause() })
+      audit.finish(`Đã gửi chỉ dẫn đến ${body.taskId}`, true)
+      return NextResponse.json({ ok: true, did: `Đã gửi chỉ dẫn đến ${body.taskId}`, pause: readPause() })
     }
 
     let did: string
     switch (body.action) {
       case 'pauseAll':
         await pauseAll((body.reason || '').trim())
-        did = 'semua kerja baru dihentikan'
+        did = 'Đã tạm dừng toàn bộ công việc mới'
         break
       case 'resumeAll':
         await resumeAll()
-        did = 'dispatch jalan lagi'
+        did = 'Đã tiếp tục điều phối công việc'
         break
       case 'unblock':
         await advanceTask('unblock', body.taskId!, body.reason)
-        did = `${body.taskId} dibuka`
+        did = `${body.taskId} đã được bỏ chặn`
         break
       case 'promote':
         await advanceTask('promote', body.taskId!, body.reason)
-        did = `${body.taskId} didorong ke ready`
+        did = `${body.taskId} đã được chuyển sang ready`
         break
       case 'release':
         await advanceTask('release', body.taskId!)
-        did = `worker untuk ${body.taskId} dilepas`
+        did = `worker của ${body.taskId} đã được giải phóng`
         break
       case 'setFallback': {
         // Cadangan chain dihitung ULANG di sini dari data yang diukur, bukan diterima dari
@@ -152,8 +162,8 @@ export async function POST(req: NextRequest) {
                 code: 'no_candidate',
                 message:
                   plan.kind === 'empty'
-                    ? 'chain cadangan sudah terisi'
-                    : `tidak ada kandidat yang layak: ${plan.why}`,
+                    ? 'Chuỗi dự phòng đã được thiết lập'
+                    : `Không có ứng viên phù hợp: ${plan.why}`,
                 status: 400,
               },
             },
@@ -161,12 +171,12 @@ export async function POST(req: NextRequest) {
           )
         }
         const { backup } = applyFallback(plan.proposed)
-        did = `cadangan dipasang: ${plan.proposed.map((e) => `${e.model} (${e.provider})`).join(', ')} — cadangan berkas di ${backup}`
+        did = `Đã thiết lập dự phòng: ${plan.proposed.map((e) => `${e.model} (${e.provider})`).join(', ')} — tệp sao lưu tại ${backup}`
         break
       }
       default:
         return NextResponse.json(
-          { error: { code: 'invalid_request', message: `aksi "${body.action}" belum ditangani`, status: 400 } },
+          { error: { code: 'invalid_request', message: `Thao tác "${body.action}" chưa được xử lý`, status: 400 } },
           { status: 400 },
         )
     }
@@ -175,7 +185,7 @@ export async function POST(req: NextRequest) {
     audit.finish(did, true)
     return NextResponse.json({ ok: true, did, pause: readPause() })
   } catch (err) {
-    audit.finish(`GAGAL: ${(err as Error).message}`, false)
+    audit.finish(`THẤT BẠI: ${(err as Error).message}`, false)
     return NextResponse.json(
       { error: { code: 'action_failed', message: (err as Error).message, status: 502 } },
       { status: 502 },

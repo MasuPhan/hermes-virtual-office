@@ -92,7 +92,7 @@ function parseArchive(name: string, text: string): ArchivedMeeting | null {
   return {
     // <date>-<id>.md
     id: name.replace(/\.md$/, '').replace(/^\d{4}-\d{2}-\d{2}-/, ''),
-    topic: topic || '(tanpa topik)',
+    topic: topic || '(chưa có chủ đề)',
     file: path.join(DATA_DIR, 'meetings', name),
     startedAt: name.slice(0, 10),
     participants: field('peserta') ? field('peserta').split(',').map((x) => x.trim()).filter(Boolean) : [],
@@ -240,7 +240,7 @@ function parseLeadingJson(text: string): unknown | null {
 async function complete(system: string, user: string): Promise<string> {
   if (!isConfigured()) {
     throw new Error(
-      'No LLM configured. Set AI_BASE_URL and AI_API_KEY (see .env.example) to enable meetings.',
+      'Chưa cấu hình LLM. Đặt AI_BASE_URL và AI_API_KEY (xem .env.example) để bật cuộc họp.',
     )
   }
   const payload = JSON.stringify({
@@ -281,7 +281,7 @@ async function complete(system: string, user: string): Promise<string> {
       }
       const text = extractContent(await res.text())
       if (!text && attempt < RETRIES) {
-        lastErr = new Error('provider returned an empty reply')
+        lastErr = new Error('Nhà cung cấp trả về phản hồi trống')
         await new Promise((r) => setTimeout(r, BACKOFF_MS * attempt))
         continue
       }
@@ -298,7 +298,7 @@ async function complete(system: string, user: string): Promise<string> {
       clearTimeout(timer)
     }
   }
-  throw lastErr || new Error('provider unreachable')
+  throw lastErr || new Error('Không thể kết nối nhà cung cấp')
 }
 
 function participantSystem(meeting: Meeting, speaker: string): string {
@@ -354,15 +354,15 @@ async function persist(meeting: Meeting): Promise<string | null> {
     // `a2a` = agent nyata via A2A. ctx menempel supaya bisa diperiksa di panel A2A.
     const modeLabel =
       meeting.mode === 'a2a'
-        ? 'a2a (pernyataan dari agent nyata via protokol A2A)'
-        : 'simulasi (yang bicara LLM gateway, BUKAN agent — perilaku lama)'
+        ? 'a2a (phát biểu của tác tử thật qua giao thức A2A)'
+        : 'Mô phỏng (LLM gateway phát biểu, KHÔNG PHẢI tác tử — hành vi cũ)'
     const doneCount = meeting.turns.filter((t) => t.kind !== 'minutes').length
     // Kejujuran arsip (RAPAT-CANCEL-1): rapat yang dibatalkan operator menandai
     // dirinya DIBATALKAN — bukan selesai. Giliran yang tak sempat jalan TIDAK
     // dikarang dan TIDAK dihilangkan: catat berhenti di giliran ke berapa.
     const statusLine = meeting.cancelled
-      ? `- status: DIBATALKAN — rapat dihentikan operator setelah ${doneCount} giliran berjalan; giliran berikutnya TIDAK dijalankan dan TIDAK dikarang`
-      : `- status: SELESAI — ${doneCount} giliran`
+      ? `- status: DIBATALKAN — người vận hành dừng cuộc họp sau ${doneCount} lượt đã chạy; KHÔNG chạy và KHÔNG bịa lượt tiếp theo`
+      : `- status: SELESAI — ${doneCount} lượt`
     const body = [
       `# ${meeting.topic}`,
       '',
@@ -371,15 +371,15 @@ async function persist(meeting: Meeting): Promise<string | null> {
       `- mode: ${meeting.mode} — ${modeLabel}`,
       `- giliran: ${doneCount}`,
       statusLine,
-      `- ctx: ${(meeting.ctxIds ?? []).join(', ') || '(tidak ada — bukan rapat A2A)'}`,
+      `- ctx: ${(meeting.ctxIds ?? []).join(', ') || '(không có — không phải cuộc họp A2A)'}`,
       '',
-      '## Transkrip',
+      '## Bản chép lời',
       '',
       ...meeting.turns
         .filter((t) => t.kind !== 'minutes')
         .map((t) => {
           // Giliran gagal dicatat apa adanya + ctx bila ada — jejak A2A utuh.
-          const fail = t.kind === 'failed' ? ' [GAGAL — bukan karangan LLM]' : ''
+          const fail = t.kind === 'failed' ? ' [THẤT BẠI — không phải do LLM bịa ra]' : ''
           const ctx = t.ctx ? ` [${t.ctx}]` : ''
           return `**${t.speaker}** (${t.kind} r${t.round})${fail}${ctx}: ${t.text}`
         }),
@@ -496,13 +496,13 @@ async function runA2aMinutes(meeting: Meeting): Promise<void> {
     )
     meeting.minutes = text
   } catch (err) {
-    meeting.minutes = `## KEPUTUSAN\nBelum ada kesepakatan final — notulen A2A gagal disusun: ${(err as Error).message}\n\n## TINDAK LANJUT\n- (tidak ada — notulen gagal)\n\n## RISIKO\n- Notulen disusun moderator gagal; baca transkrip mentah di atas.`
+    meeting.minutes = `## KEPUTUSAN\nChưa có thống nhất cuối cùng — không thể tổng hợp biên bản A2A: ${(err as Error).message}\n\n## TINDAK LANJUT\n- (không có — tổng hợp biên bản thất bại)\n\n## RISIKO\n- Người chủ trì không thể tổng hợp biên bản; hãy đọc bản chép lời gốc phía trên.`
   }
   push(meeting, {
     round: 2,
     speaker: meeting.moderator,
     kind: 'minutes',
-    text: 'Notulen tersimpan.',
+    text: 'Đã lưu biên bản.',
     ts: Date.now(),
   })
   meeting.file = await persist(meeting)
@@ -536,7 +536,7 @@ async function runA2a(meeting: Meeting): Promise<void> {
       round: 0,
       speaker: 'sistem',
       kind: 'speech',
-      text: `Rapat gagal: ${(err as Error).message}`,
+      text: `Cuộc họp thất bại: ${(err as Error).message}`,
       ts: Date.now(),
     })
   } finally {
@@ -557,16 +557,16 @@ async function finalizeCancelled(meeting: Meeting): Promise<void> {
   const doneCount = meeting.turns.filter((t) => t.kind !== 'minutes').length
   meeting.cancelled = true
   meeting.minutes =
-    `## KEPUTUSAN\nRapat DIBATALKAN operator setelah ${doneCount} giliran berjalan — ` +
-    `bukan rapat selesai, tidak ada kesepakatan yang bisa dikutip dari sini.\n\n` +
-    `## TINDAK LANJUT\n- (tidak ada — rapat dibatalkan, giliran berikutnya tidak dijalankan)\n\n` +
-    `## RISIKO\n- Transkrip di atas HANYA berisi ${doneCount} giliran yang sempat berjalan; ` +
-    `jangan mengutip beyond itu.`
+    `## KEPUTUSAN\nNgười vận hành ĐÃ HỦY cuộc họp sau ${doneCount} lượt đã chạy — ` +
+    `cuộc họp chưa hoàn tất, không có thống nhất nào để trích dẫn từ đây.\n\n` +
+    `## TINDAK LANJUT\n- (không có — cuộc họp đã hủy, không chạy lượt tiếp theo)\n\n` +
+    `## RISIKO\n- Bản chép lời phía trên CHỈ gồm ${doneCount} lượt đã thực sự diễn ra; ` +
+    `không trích dẫn vượt quá nội dung đó.`
   push(meeting, {
     round: 0,
     speaker: 'sistem',
     kind: 'minutes',
-    text: 'Rapat dibatalkan — arsip bertanda DIBATALKAN.',
+    text: 'Đã hủy cuộc họp — bản lưu được đánh dấu ĐÃ HỦY.',
     ts: Date.now(),
   })
   meeting.file = await persist(meeting)
@@ -667,7 +667,7 @@ async function run(meeting: Meeting): Promise<void> {
       round: rounds + 1,
       speaker: meeting.moderator,
       kind: 'minutes',
-      text: 'Notulen tersimpan.',
+      text: 'Đã lưu biên bản.',
       ts: Date.now(),
     })
     meeting.file = await persist(meeting)
@@ -682,7 +682,7 @@ async function run(meeting: Meeting): Promise<void> {
       round: 0,
       speaker: 'sistem',
       kind: 'speech',
-      text: `Rapat gagal: ${(err as Error).message}`,
+      text: `Cuộc họp thất bại: ${(err as Error).message}`,
       ts: Date.now(),
     })
   } finally {
@@ -698,9 +698,9 @@ export async function startMeeting(input: {
 }): Promise<Meeting> {
   const topic = input.topic.trim().slice(0, 300)
   const participants = [...new Set(input.participants.filter(Boolean))].slice(0, MAX_PARTICIPANTS)
-  if (!topic) throw new Error('topik wajib diisi')
-  if (participants.length < 2) throw new Error('butuh minimal 2 peserta')
-  if (busy) throw new Error('masih ada rapat yang berjalan — tunggu sampai selesai')
+  if (!topic) throw new Error('Bắt buộc nhập chủ đề')
+  if (participants.length < 2) throw new Error('Cần ít nhất 2 người tham gia')
+  if (busy) throw new Error('Vẫn có cuộc họp đang diễn ra — hãy chờ kết thúc')
 
   const moderator =
     input.moderator && participants.includes(input.moderator) ? input.moderator : participants[0]

@@ -2,8 +2,6 @@ import { NextRequest, NextResponse } from 'next/server'
 import {
   createProfile,
   deleteProfile,
-  ensureA2aPeer,
-  ensureA2aToolset,
   hermesHome,
   listAgents,
   listAssignees,
@@ -11,24 +9,27 @@ import {
   listTasks,
   profileModel,
   purgeTasks,
-  removeA2aPeer,
   setProfileModel,
   tasksForAssignee,
 } from '@/lib/hermes/kanban'
 import { BUILTIN_HIDDEN, hiddenNames, isHidden, hide, show } from '@/lib/hermes/office-membership'
-import { assertLocalWriteRequest } from '@/lib/local-guard'
+import { assertApiRequest } from '@/lib/api-policy'
 import type { AgentDivision, AgentRole } from '@/types/hermes'
 import { ROLE_LABEL, soulFor } from '@/lib/hermes/soul'
 import { parseDomains, ownersForDomains } from '@/lib/hermes/a2a'
-import { listServedAgents, removeServedAgent, upsertServedAgent } from '@/lib/hermes/a2a-served'
+import {
+  A2A_CONFIG_WRITE_DISABLED_REASON,
+  listServedAgents,
+  removeServedAgent,
+  upsertServedAgent,
+} from '@/lib/hermes/a2a-served'
 import { gatewayStartMs, needsRestart } from '@/lib/hermes/doctor'
 import { stat } from 'node:fs/promises'
 import { deleteAvatar } from '@/lib/office/db'
-import { readdir, rm } from 'node:fs/promises'
-import path from 'node:path'
 import { blockedAssigneesFor } from '@/lib/hermes/approvals'
 import { agentPermissionSummary, checkAgentAction, type AgentActionKind } from '@/lib/hermes/control'
 import { denyAudit } from '@/lib/hermes/audit'
+import { validateProfileName } from '@/lib/hermes/profile-name'
 
 export const dynamic = 'force-dynamic'
 
@@ -54,7 +55,9 @@ async function readNeedsGatewayRestart(): Promise<boolean | null> {
  * touch the profile or its tasks. `kill` is the destructive one: it deletes the
  * profile and purges its tasks.
  */
-export async function GET() {
+export async function GET(req: NextRequest) {
+  const denied = assertApiRequest(req, 'read')
+  if (denied) return denied
   try {
     const [assignees, tasks, profiles] = await Promise.all([
       listAssignees(),
@@ -70,9 +73,9 @@ export async function GET() {
     // Union of assignees and on-disk profiles: a profile with no tasks is still a
     // profile, and must be listed or creating one looks like it failed.
     const counts = new Map(assignees.map((a) => [a.name, a.total]))
-    // `default` and any runtime-hidden profile must not appear in the spawn panel:
-    // it is not a colleague, it is the install's own orchestrator profile.
-    const roster = [...new Set([...counts.keys(), ...profiles])].filter((n) => !isHidden(n)).sort()
+    // Management includes hidden/outside profiles so office settings remain
+    // reachable. inOffice still follows the existing membership policy.
+    const roster = [...new Set([...counts.keys(), ...profiles])].sort()
     // Each profile's default model costs one CLI read (`-p <name> config get
     // model`), so they run in parallel and only for profiles that exist on disk —
     // an assignee left over from a deleted profile has no config to read.
@@ -160,8 +163,10 @@ export async function GET() {
  * despawns on arrival, rather than vanishing at its desk.
  */
 export async function POST(req: NextRequest) {
-  const denied = assertLocalWriteRequest(req)
-  if (denied) return denied
+  // Host + exact Origin first; the per-action access level (office-only vs
+  // management vs privileged) is enforced below once `action` is known.
+  const ingress = assertApiRequest(req, 'office-write')
+  if (ingress) return ingress
   const body = await req.json().catch(() => ({}))
   const action = String(body?.action || '')
   const name = String(body?.name || '').trim()
@@ -179,16 +184,42 @@ export async function POST(req: NextRequest) {
       {
         error: {
           code: 'invalid_request',
-          message: "action must be 'spawn', 'hide', 'kill', 'create', 'set-model', 'serve' or 'unserve'",
+          message: "action phải là 'spawn', 'hide', 'kill', 'create', 'set-model', 'serve' hoặc 'unserve'",
           status: 400,
         },
       },
       { status: 400 },
     )
   }
-  if (!name) {
+
+  // HVO-11: validate at the API boundary BEFORE any CLI/filesystem work.
+  // Names like `..`, `a/b`, empty or overlong strings never reach path.join or
+  // the Hermes CLI. `default` is valid only for the membership actions.
+  let cleanName: string
+  try {
+    cleanName = validateProfileName(name, {
+      allowDefault: action === 'spawn' || action === 'hide',
+    })
+  } catch (err) {
     return NextResponse.json(
-      { error: { code: 'invalid_request', message: 'name is required', status: 400 } },
+      { error: { code: 'invalid_request', message: (err as Error).message, status: 400 } },
+      { status: 400 },
+    )
+  }
+
+  // Destructive/installation-wide actions need the second explicit opt-in.
+  const access =
+    action === 'kill'
+      ? 'privileged'
+      : action === 'create' || action === 'set-model' || action === 'serve' || action === 'unserve'
+        ? 'management-write'
+        : 'office-write'
+  const policyDenied = assertApiRequest(req, access)
+  if (policyDenied) return policyDenied
+
+  if (!cleanName) {
+    return NextResponse.json(
+      { error: { code: 'invalid_request', message: 'Bắt buộc nhập name', status: 400 } },
       { status: 400 },
     )
   }
@@ -204,17 +235,17 @@ export async function POST(req: NextRequest) {
       {
         at: new Date().toISOString(),
         action: `agent:${action}`,
-        agent: agent || '(tanpa nama)',
-        reason: `${action} "${name}" atas nama ${agent || '?'}`,
-        effect: `permintaan agent untuk ${action} profil "${name}"`,
+        agent: agent || '(không tên)',
+        reason: `${action} "${name}" thay mặt ${agent || '?'}`,
+        effect: `Yêu cầu của tác tử để ${action} hồ sơ "${name}"`,
       },
-      `hanya operator yang boleh ${action === 'serve' ? 'mendaftarkan' : 'mencabut'} entri A2A — mengubah config gateway bukan wewenang agent`,
+      `Chỉ người vận hành mới được ${action === 'serve' ? 'đăng ký' : 'thu hồi'} mục A2A — tác tử không có quyền sửa cấu hình gateway`,
     )
     return NextResponse.json(
       {
         error: {
           code: 'refused',
-          message: `hanya operator yang boleh ${action === 'serve' ? 'mendaftarkan' : 'mencabut'} entri A2A — mengubah config gateway bukan wewenang agent`,
+          message: `Chỉ người vận hành mới được ${action === 'serve' ? 'đăng ký' : 'thu hồi'} mục A2A — tác tử không có quyền sửa cấu hình gateway`,
           status: 400,
         },
       },
@@ -233,9 +264,9 @@ export async function POST(req: NextRequest) {
         {
           at: new Date().toISOString(),
           action: `agent:${action}`,
-          agent: agent || '(tanpa nama)',
-          reason: `${action} "${name}" atas nama ${agent || '?'} (${role || '?'})`.slice(0, 300),
-          effect: `permintaan agent untuk ${action} profil "${name}"`,
+          agent: agent || '(không tên)',
+          reason: `${action} "${name}" thay mặt ${agent || '?'} (${role || '?'})`.slice(0, 300),
+          effect: `Yêu cầu của tác tử để ${action} hồ sơ "${name}"`,
         },
         verdict.why,
       )
@@ -246,109 +277,37 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // The profile's default model: what its workers and chat turns run unless a task
-  // pins its own (`hermes kanban set-model`).
-  // SELFREPAIR-1 Celah 1: `serve` / `unserve` — daftarkan/cabut entri A2A untuk
-  // profil yang sudah ada (memakai upsertServedAgent/removeServedAgent: backup
-  // dulu, sunting bedah, local:false). Jujur: daftar served dibaca SEKALI saat
-  // gateway boot — berlaku SETELAH restart, bukan langsung aktif.
+  // A2A served-agent registration: DISABLED (HVO-01). Refuse serve/unserve here,
+  // before any profile or gateway-config read/write. The writer itself also fails
+  // closed; the gateway config must be edited manually until a correct YAML
+  // serializer exists.
   if (action === 'serve' || action === 'unserve') {
-    try {
-      const profiles = await listProfiles()
-      if (!profiles.includes(name)) {
-        return NextResponse.json(
-          {
-            error: {
-              code: 'invalid_request',
-              message: `profil "${name}" tidak dikenal — tidak ada profil di disk untuk ${action === 'serve' ? 'didaftarkan' : 'dicabut'}`,
-              status: 400,
-            },
-          },
-          { status: 400 },
-        )
-      }
-      if (action === 'serve') {
-        // Deskripsi dari entri served SEBELUMNYA bila ada (upsert menimpa).
-        // null = profil tanpa entri sebelumnya — fallback generik saja.
-        const prev = (await listServedAgents().catch(() => [])).find((s) => s.profile === name)
-        await upsertServedAgent({
-          slug: name,
-          description: prev?.description || `Hermes profile '${name}' exposed over A2A.`,
-          advertisedToolsets: prev?.advertised_toolsets ?? [],
-        })
-        // A2A-CALL-1: serve = bisa DIPANGGIL + bisa MEMANGGIL. Daftarkan peer
-        // supaya nama agent selalu resolvable (sebab-2 RAPAT-A2A-2), dan
-        // pastikan toolset a2a (GABUNG, bukan timpa). Peer ditulis di global
-        // + scope profil SEMUA agent served lain supaya gate tool Hermes
-        // (_a2a_tools_available, baca scope profil) terbuka di sesi mereka.
-        // Keduanya idempoten; gagal dilaporkan jujur TANPA membatalkan served.
-        let peerAdded: boolean | null = null
-        let peerError: string | null = null
-        let peerProfiles: string[] = []
-        try {
-          const others = (await listServedAgents().catch(() => []))
-            .map((s) => s.profile).filter((p) => p.toLowerCase() !== name.toLowerCase())
-          const r = await ensureA2aPeer(name, others)
-          peerAdded = r.added
-          peerProfiles = r.profileAdded
-        } catch (err) {
-          peerAdded = false
-          peerError = (err as Error).message
-        }
-        let toolsetAdded: boolean | null = null
-        let toolsetError: string | null = null
-        try {
-          toolsetAdded = (await ensureA2aToolset(name)).added
-        } catch (err) {
-          toolsetAdded = false
-          toolsetError = (err as Error).message
-        }
-        return NextResponse.json({
-          success: true,
-          action,
-          name,
-          a2aNote:
-            'Terdaftar. Berlaku setelah gateway di-restart — sampai itu, agent belum bisa dipanggil.',
-          /** Peer `<nama>-local` terdaftar? false+gagal = pendaftaran gagal (lihat peerError). */
-          peerAdded,
-          peerError,
-          /** Profil yang ikut ditulisi peer (gate tool scope-profil). */
-          peerProfiles,
-          /** Toolset a2a ditambahkan ke profil? false+gagal = lihat toolsetError. */
-          toolsetAdded,
-          toolsetError,
-          needsGatewayRestart: await readNeedsGatewayRestart(),
-        })
-      } else {
-        await removeServedAgent(name)
-        return NextResponse.json({
-          success: true,
-          action,
-          name,
-          a2aNote:
-            'Tercabut dari config. Berlaku setelah gateway di-restart — sampai itu, path A2A-nya masih dijawab.',
-          needsGatewayRestart: await readNeedsGatewayRestart(),
-        })
-      }
-    } catch (err) {
-      return NextResponse.json(
-        { error: { code: 'action_failed', message: (err as Error).message, status: 502 } },
-        { status: 502 },
-      )
-    }
+    return NextResponse.json(
+      {
+        success: false,
+        disabled: true,
+        error: {
+          code: 'a2a_config_write_disabled',
+          message: A2A_CONFIG_WRITE_DISABLED_REASON,
+          status: 501,
+        },
+      },
+      { status: 501 },
+    )
   }
+
   if (action === 'set-model') {
     const model = body?.model == null ? '' : String(body.model).trim()
     const provider = body?.provider == null ? null : String(body.provider).trim() || null
     if (!model) {
       return NextResponse.json(
-        { error: { code: 'invalid_request', message: 'model is required', status: 400 } },
+        { error: { code: 'invalid_request', message: 'Bắt buộc chọn model', status: 400 } },
         { status: 400 },
       )
     }
     try {
-      await setProfileModel(name, model, provider)
-      return NextResponse.json({ success: true, action, name, model, provider })
+      await setProfileModel(cleanName, model, provider)
+      return NextResponse.json({ success: true, action, name: cleanName, model, provider })
     } catch (err) {
       return NextResponse.json(
         { error: { code: 'action_failed', message: (err as Error).message, status: 502 } },
@@ -378,12 +337,11 @@ export async function POST(req: NextRequest) {
     const advertisedToolsets = Array.isArray(body?.advertisedToolsets)
       ? (body.advertisedToolsets as unknown[]).map((t) => String(t ?? '').trim()).filter(Boolean)
       : []
-    // Toggle A2A: default NYALA (permintaan operator eksplisit: spawn dari mana
-    // pun harus langsung A2A). Mati hanya bila klien mengirim serveA2a:false
-    // eksplisit. Default di SISI SERVER supaya jalur baru (avatar, dst) yang
-    // lupa mengirim flag tidak mengulangi bug "kok gak masuk".
-    // Hidup = daftarkan served-agent (local:false). Mati = jangan sentuh config.
-    const serveA2a = body?.serveA2a !== false
+    // HVO-01: A2A registration is OPT-IN. Only an explicit `serveA2a: true`
+    // attempts it; omission never touches gateway config. The writer itself is
+    // disabled in this patch, so an explicit opt-in reports the deferred
+    // capability honestly instead of mutating config or other profiles.
+    const serveA2a = body?.serveA2a === true
     // Model pilihan operator saat membuat. Kosong = jangan sentuh config profil sama
     // sekali, supaya agent baru ikut bawaan Hermes, bukan dipaksa ke satu model.
     const model = body?.model == null ? '' : String(body.model).trim()
@@ -437,25 +395,9 @@ export async function POST(req: NextRequest) {
           a2aRegistered = false
           a2aError = (err as Error).message
         }
-        // Gagal di sini tak membatalkan profil — lapor jujur seperti a2aError.
-        // Peer: global + profil semua served lain (gate tool scope-profil).
-        let peerProfiles: string[] = []
-        try {
-          toolsetAdded = (await ensureA2aToolset(created.name)).added
-        } catch (err) {
-          toolsetAdded = false
-          toolsetError = (err as Error).message
-        }
-        try {
-          const others = (await listServedAgents().catch(() => []))
-            .map((s) => s.profile).filter((p) => p.toLowerCase() !== created.name.toLowerCase())
-          const r = await ensureA2aPeer(created.name, others)
-          peerAdded = r.added
-          peerProfiles = r.profileAdded
-        } catch (err) {
-          peerAdded = false
-          peerError = (err as Error).message
-        }
+        // No peer/toolset writes here: the served-agent writer is disabled and
+        // cross-profile config mutations are not implicit consequences of a
+        // create. When a safe serializer exists this can be reconsidered.
       }
       return NextResponse.json(
         {
@@ -492,7 +434,7 @@ export async function POST(req: NextRequest) {
            */
           a2aNote:
             a2aRegistered === true
-              ? 'Tersimpan. Berlaku setelah gateway di-restart — sampai itu, agent belum bisa dipanggil.'
+              ? 'Đã lưu. Có hiệu lực sau khi khởi động lại gateway — trước đó chưa thể gọi tác tử.'
               : null,
           /**
            * Keadaan "butuh restart" SESUDAH tulis ini — SATU sumber kebenaran
@@ -535,7 +477,7 @@ export async function POST(req: NextRequest) {
           {
             error: {
               code: 'invalid_request',
-              message: `profil "${name}" tidak dikenal`,
+              message: `Hồ sơ "${name}" không xác định`,
               status: 400,
             },
           },
@@ -549,7 +491,7 @@ export async function POST(req: NextRequest) {
     // This is the safe path, and the ONLY one offered for a name that has no
     // profile on disk but still owns tasks.
     if (action === 'hide') {
-      const changed = hide(name)
+      const changed = hide(cleanName)
       return NextResponse.json({
         success: true,
         action,
@@ -566,12 +508,12 @@ export async function POST(req: NextRequest) {
     if (action === 'kill') {
       // `default` lives at ~/.hermes itself, not under profiles/, so the disk
       // check below would refuse it with a misleading "tidak ada di disk".
-      if (name === 'default') {
+      if (cleanName === 'default') {
         return NextResponse.json(
           {
             error: {
               code: 'invalid_request',
-              message: 'profil "default" tidak bisa dihapus',
+              message: 'Không thể xóa hồ sơ "default"',
               status: 400,
             },
           },
@@ -582,7 +524,7 @@ export async function POST(req: NextRequest) {
       /* ---- 1. the tasks ---- */
       // Killing an agent deletes its work too, which is what "kill" should mean —
       // otherwise the board fills with tasks belonging to nobody.
-      const owned = await tasksForAssignee(name)
+      const owned = await tasksForAssignee(cleanName)
       // Refuse while any of them is live. Archiving a running task abandons the
       // worker mid-flight and the CLI will do it without complaint.
       const active = owned.filter((t) => t.status === 'running' || t.status === 'review')
@@ -592,8 +534,8 @@ export async function POST(req: NextRequest) {
             error: {
               code: 'invalid_request',
               message:
-                `${name} punya ${active.length} tugas yang masih berjalan ` +
-                `(${active.map((t) => t.id).join(', ')}). Hentikan dulu sebelum dihapus.`,
+                `${name} có ${active.length} công việc vẫn đang chạy ` +
+                `(${active.map((t) => t.id).join(', ')}). Hãy dừng trước khi xóa.`,
               status: 409,
             },
           },
@@ -602,7 +544,7 @@ export async function POST(req: NextRequest) {
       }
 
       /* ---- 2. the profile ---- */
-      const hasProfile = (await listProfiles()).includes(name)
+      const hasProfile = (await listProfiles()).includes(cleanName)
       if (!hasProfile && !owned.length) {
         // Nothing at all: no profile, no tasks. Explain rather than report a
         // failed delete.
@@ -610,7 +552,7 @@ export async function POST(req: NextRequest) {
           {
             error: {
               code: 'no_profile',
-              message: `"${name}" tidak punya profil maupun tugas — tidak ada yang bisa dihapus.`,
+              message: `"${cleanName}" không có hồ sơ hay công việc — không có gì để xóa.`,
               status: 409,
             },
           },
@@ -624,7 +566,7 @@ export async function POST(req: NextRequest) {
           const r = await purgeTasks(owned.map((t) => t.id))
           purged = r.purged
         }
-        if (hasProfile) await deleteProfile(name)
+        if (hasProfile) await deleteProfile(cleanName)
       } catch (err) {
         const msg = (err as Error).message
         // Refusals (default, gateway running) are the caller's, not a server fault.
@@ -635,7 +577,7 @@ export async function POST(req: NextRequest) {
               code: refused ? 'invalid_request' : 'action_failed',
               message:
                 purged > 0
-                  ? `${purged} tugas sudah dihapus, tapi profilnya gagal: ${msg}`
+                  ? `${purged} công việc đã được xóa, nhưng xóa hồ sơ thất bại: ${msg}`
                   : msg,
               status: refused ? 400 : 502,
             },
@@ -646,62 +588,33 @@ export async function POST(req: NextRequest) {
 
       // Clear any membership entry: a stale entry would block a future profile
       // that reuses the name.
-      show(name)
-      // KILL-BERSIH-1: kill = hapus juga dari kantor. Tiga pembersihan di
-      // bawah ini TIDAK membatalkan kill bila gagal — profilnya sudah
-      // terhapus, jadi kegagalan di sini dilaporkan jujur (bukan 502).
-      // 1. Cabut entri A2A (tidak terdaftar = hasil sah, bukan error).
+      show(cleanName)
+      // Cleanup failures never turn a completed delete into a 502.
+      // 1. A2A served entry: writer disabled (HVO-01), so this is reported, not
+      // attempted. It must be removed manually from gateway config.
       let a2aRemoved: boolean | null = null
       let a2aError: string | null = null
       try {
-        a2aRemoved = (await removeServedAgent(name)).removed
+        a2aRemoved = (await removeServedAgent(cleanName)).removed
       } catch (err) {
         a2aRemoved = false
         a2aError = (err as Error).message
       }
-      // A2A-CALL-1: cabut juga peer `<nama>-local` (global + profil served
-      // lain) supaya tak tinggal peer basi yang menunjuk path agent yang
-      // sudah tiada. Tak terdaftar = sah.
-      let peerRemoved: boolean | null = null
-      let peerError: string | null = null
-      let peerProfilesRemoved: string[] = []
-      try {
-        const others = (await listServedAgents().catch(() => []))
-          .map((s) => s.profile).filter((p) => p.toLowerCase() !== name.toLowerCase())
-        const r = await removeA2aPeer(name, others)
-        peerRemoved = r.removed
-        peerProfilesRemoved = r.profileRemoved
-      } catch (err) {
-        peerRemoved = false
-        peerError = (err as Error).message
-      }
-      // 2. Hapus baris avatar `agent:<nama>` — badannya keluar dari kantor
-      // (scene menandai yang hilang sebagai leaving, lalu despawn di pintu).
-      const avatarRemoved = deleteAvatar(`agent:${name}`)
-      // 3. Bersihkan sisa direktori profil yang ditinggalkan
-      // `hermes profile delete` (tombstone + cache). deleteProfile di atas
-      // sudah menghapus profilnya; yang dibersihkan di sini hanyalah sisa
-      // yang membuat direktori `profiles/<nama>/` masih terlihat ada.
-      // Jujur: bila direktori sudah tidak ada, tidak ada yang dibersihkan
-      // (false), bukan klaim. rm force:true tidak error untuk yang hilang,
-      // jadi keberadaan dicek dulu lewat readdir.
-      let dirRemoved = false
-      let dirError: string | null = null
-      try {
-        const { hermesHome } = await import('@/lib/hermes/kanban')
-        const dir = path.join(hermesHome(), 'profiles', name)
-        const entries = await readdir(dir).catch(() => null)
-        if (entries !== null) {
-          await rm(dir, { recursive: true, force: true })
-          dirRemoved = true
-        }
-      } catch (err) {
-        dirError = (err as Error).message
-      }
+      // 2. Peer cleanup is intentionally NOT performed here: writing/config
+      // touching OTHER profiles as a side effect of kill is a cross-profile
+      // mutation. Report it for manual recovery instead.
+      const peerRemoved: boolean | null = null
+      const peerError: string | null =
+        'Không tự động thu hồi peer giữa các hồ sơ — hãy kiểm tra a2a_agents thủ công'
+      const peerProfilesRemoved: string[] = []
+      // 3. Avatar row only. HVO-11: NO recursive directory removal here. A
+      // task-only assignee has no profile directory, and `profiles/<name>` is
+      // not ours to delete after `hermes profile delete` has run.
+      const avatarRemoved = deleteAvatar(`agent:${cleanName}`)
       return NextResponse.json({
         success: true,
         action,
-        name,
+        name: cleanName,
         /** The profile no longer exists (false when it was already gone). */
         deleted: hasProfile,
         /** How many of its tasks were removed from the board. */
@@ -716,10 +629,11 @@ export async function POST(req: NextRequest) {
         peerProfilesRemoved: hasProfile ? peerProfilesRemoved : null,
         /** Baris avatar `agent:<nama>` terhapus dari kantor? */
         avatarRemoved,
-        /** Sisa direktori `profiles/<nama>/` dibersihkan? */
-        dirRemoved,
-        /** Gagal membersihkan sisa direktori (null = tidak ada kegagalan). */
-        dirError,
+        /** HVO-11: recursive post-kill directory cleanup was removed entirely. */
+        dirRemoved: false,
+        dirError: null,
+        cleanupDeferred:
+          'Không tự động xóa thư mục hồ sơ còn sót lại (nếu có) — hãy kiểm tra, sao lưu rồi khôi phục/xóa thủ công',
         /**
          * Jujur soal waktu berlaku: daftar served-agent dibaca SEKALI saat
          * gateway boot — pencabutan baru berlaku setelah gateway di-restart.
@@ -727,7 +641,7 @@ export async function POST(req: NextRequest) {
          */
         a2aNote:
           a2aRemoved === true
-            ? 'Tercabut dari config. Berlaku setelah gateway di-restart — sampai itu, path A2A-nya masih dijawab.'
+            ? 'Đã gỡ khỏi cấu hình. Có hiệu lực sau khi khởi động lại gateway — trước đó đường dẫn A2A vẫn trả lời.'
             : null,
         hidden: hiddenNames(),
       })
@@ -741,14 +655,14 @@ export async function POST(req: NextRequest) {
         {
           error: {
             code: 'invalid_request',
-            message: `profil "${name}" adalah profil bawaan Hermes dan tidak bisa dimunculkan di kantor`,
+            message: `Hồ sơ "${name}" là hồ sơ mặc định của Hermes, không thể đưa vào văn phòng`,
             status: 400,
           },
         },
         { status: 400 },
       )
     }
-    const changed = show(name)
+    const changed = show(cleanName)
     return NextResponse.json({
       success: true,
       action,

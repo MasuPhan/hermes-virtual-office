@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { VERIFICATION_BATCH_CAP } from '@/lib/hermes/verification'
 import { verificationMarks } from '@/lib/hermes/kanban'
+import { assertApiRequest } from '@/lib/api-policy'
 
 export const dynamic = 'force-dynamic'
 
@@ -12,11 +13,13 @@ export const dynamic = 'force-dynamic'
  * Maksimal VERIFICATION_BATCH_CAP id diperiksa; sisanya `unchecked` (netral, tidak dinilai).
  */
 export async function POST(req: NextRequest) {
+  const denied = assertApiRequest(req, 'read')
+  if (denied) return denied
   const body = await req.json().catch(() => ({}))
   const ids: unknown = body?.ids
   if (!Array.isArray(ids)) {
     return NextResponse.json(
-      { error: { code: 'invalid_request', message: 'ids (array) wajib diisi', status: 400 } },
+      { error: { code: 'invalid_request', message: 'Bắt buộc có ids (mảng)', status: 400 } },
       { status: 400 },
     )
   }
@@ -24,7 +27,7 @@ export async function POST(req: NextRequest) {
     const marks = await verificationMarks(ids.filter((x): x is string => typeof x === 'string'))
     return NextResponse.json({
       mode: 'ringkas',
-      note: 'ringkas: hanya show (status+events) per id; panel detail membaca task yang sama',
+      note: 'Rút gọn: chỉ show (status+events) theo từng ID; bảng chi tiết đọc cùng công việc đó',
       cap: VERIFICATION_BATCH_CAP,
       ageSeconds: 0,
       readAt: new Date().toISOString(),

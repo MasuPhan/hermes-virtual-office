@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { assertLocalWriteRequest } from '@/lib/local-guard'
+import { assertApiRequest } from '@/lib/api-policy'
 import { actOnJob, createJob, listJobs, listRuns, parseLimit, readJobList, type JobAction } from '@/lib/hermes/cron'
 import { cronPulse } from '@/lib/office/duty'
 
@@ -17,6 +17,8 @@ export const dynamic = 'force-dynamic'
  * confirmed click from an unconfirmed one. Documented in API-SPEC.md.
  */
 export async function GET(req: NextRequest) {
+  const denied = assertApiRequest(req, 'read')
+  if (denied) return denied
   const id = req.nextUrl.searchParams.get('id')
   const limit = Number(req.nextUrl.searchParams.get('limit') || 25)
   try {
@@ -37,7 +39,7 @@ export async function GET(req: NextRequest) {
       const job = readout.jobs.find((j) => j.id === id)
       if (!job) {
         return NextResponse.json(
-          { error: { code: 'invalid_request', message: `job "${id}" tidak ditemukan`, status: 404 } },
+          { error: { code: 'invalid_request', message: `Tác vụ "${id}" không tìm thấy`, status: 404 } },
           { status: 404 },
         )
       }
@@ -64,10 +66,17 @@ export async function GET(req: NextRequest) {
 const ACTIONS: JobAction[] = ['pause', 'resume', 'run', 'remove']
 
 export async function POST(req: NextRequest) {
-  const denied = assertLocalWriteRequest(req)
-  if (denied) return denied
+  const ingress = assertApiRequest(req, 'management-write')
+  if (ingress) return ingress
   const body = await req.json().catch(() => ({}))
   const action = String(body?.action || '')
+  // `run` executes work now; `remove` deletes a job. Both are destructive in
+  // their own way and need the second explicit opt-in.
+  const policyDenied = assertApiRequest(
+    req,
+    action === 'run' || action === 'remove' ? 'privileged' : 'management-write',
+  )
+  if (policyDenied) return policyDenied
 
   try {
     /* ------------------------------------------------------------- create --- */
@@ -77,13 +86,13 @@ export async function POST(req: NextRequest) {
       const script = body?.script ? String(body.script) : ''
       if (!schedule.trim()) {
         return NextResponse.json(
-          { error: { code: 'invalid_request', message: 'jadwal wajib diisi', status: 400 } },
+          { error: { code: 'invalid_request', message: 'Bắt buộc nhập lịch chạy', status: 400 } },
           { status: 400 },
         )
       }
       if (!prompt.trim() && !script.trim()) {
         return NextResponse.json(
-          { error: { code: 'invalid_request', message: 'isi prompt atau script', status: 400 } },
+          { error: { code: 'invalid_request', message: 'Nhập prompt hoặc script', status: 400 } },
           { status: 400 },
         )
       }
@@ -109,7 +118,7 @@ export async function POST(req: NextRequest) {
         {
           error: {
             code: 'invalid_request',
-            message: `action harus salah satu dari: create, ${ACTIONS.join(', ')}`,
+            message: `action phải là một trong: create, ${ACTIONS.join(', ')}`,
             status: 400,
           },
         },
@@ -120,7 +129,7 @@ export async function POST(req: NextRequest) {
     const id = String(body?.id || '').trim()
     if (!id) {
       return NextResponse.json(
-        { error: { code: 'invalid_request', message: 'id job wajib diisi', status: 400 } },
+        { error: { code: 'invalid_request', message: 'Bắt buộc nhập ID tác vụ', status: 400 } },
         { status: 400 },
       )
     }

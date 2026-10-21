@@ -66,7 +66,7 @@ export function beginAudit(entry: AuditEntry): { finish: (result: string, ok: bo
  * Pola yang sama dengan aksi biasa — niat dulu, lalu hasil `ok:false` berisi alasannya.
  */
 export function denyAudit(entry: Omit<AuditEntry, 'result' | 'ok'>, why: string): void {
-  beginAudit(entry).finish(`DITOLAK: ${why}`, false)
+  beginAudit(entry).finish(`TỪ CHỐI: ${why}`, false)
 }
 
 function appendLine(e: AuditEntry): void {

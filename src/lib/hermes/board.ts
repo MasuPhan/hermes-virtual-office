@@ -64,11 +64,11 @@ export function needsHuman(k: BlockKind): boolean {
 
 /** Label Indonesia untuk tiap jenis, dipakai UI dan tes dari sumber yang sama. */
 export const BLOCK_LABEL: Record<BlockKind, string> = {
-  dependency: 'menunggu task lain',
-  needs_input: 'menunggu keputusan kamu',
-  capability: 'tidak bisa dikerjakan',
-  transient: 'gagal sementara',
-  unspecified: 'diblokir',
+  dependency: 'Chờ công việc khác',
+  needs_input: 'Chờ quyết định của bạn',
+  capability: 'Không thể thực hiện',
+  transient: 'Lỗi tạm thời',
+  unspecified: 'Bị chặn',
 }
 
 /**
@@ -113,7 +113,7 @@ export function readBlock(
     const recurrences = Number(p.recurrences ?? 1)
     return {
       kind,
-      reason: String(p.reason ?? '').trim() || '(tanpa alasan tertulis)',
+      reason: String(p.reason ?? '').trim() || '(không ghi lý do)',
       recurrences: Number.isFinite(recurrences) ? recurrences : 1,
       looping: Number.isFinite(recurrences) && recurrences >= LOOP_THRESHOLD,
     }
@@ -159,10 +159,10 @@ export function readStuck(t: Task, ageMinutes: number | null): StuckInfo | null 
   const jam = (ageMinutes / 60).toFixed(1)
   const why =
     t.status === 'running'
-      ? `berjalan tapi tidak bergerak ${jam} jam — worker mungkin sudah mati`
+      ? `Đang chạy nhưng không có tiến triển suốt ${jam} giờ — worker có thể đã dừng`
       : t.status === 'review'
-        ? `menunggu review ${jam} jam — mungkin tidak ada yang diberi tahu`
-        : `menganggur ${jam} jam di kolom ${t.status}`
+        ? `Chờ đánh giá ${jam} giờ — có thể chưa ai được thông báo`
+        : `Không hoạt động suốt ${jam} giờ trong cột ${t.status}`
   return { minutes: ageMinutes, threshold, why }
 }
 

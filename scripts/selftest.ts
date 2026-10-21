@@ -10,6 +10,28 @@
  * Run: npm run selftest
  */
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import ts from 'typescript'
+import vi from '../src/locales/vi.json'
+
+// Inspect only translation calls actually referenced by the UI. Expectations
+// remain independent literals below; missing catalog entries fail closed.
+function localizedSource(url: URL): string {
+  const source = readFileSync(url, 'utf8')
+  const ast = ts.createSourceFile(url.pathname, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+  const edits: { start: number; end: number; text: string }[] = []
+  function visit(node: ts.Node): void {
+    if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === 'translate'
+      && node.arguments.length === 1 && ts.isStringLiteral(node.arguments[0])) {
+      const key = node.arguments[0].text
+      const text = (vi as Record<string, string>)[key]
+      if (typeof text !== 'string') throw new Error(`Missing Vietnamese translation: ${key}`)
+      edits.push({ start: node.getStart(ast), end: node.end, text: JSON.stringify(text) })
+    }
+    ts.forEachChild(node, visit)
+  }
+  visit(ast)
+  return edits.sort((a, b) => b.start - a.start).reduce((s, e) => s.slice(0, e.start) + e.text + s.slice(e.end), source)
+}
 import { facingProblems } from '../src/lib/office/facing'
 import { APPROVAL_WAIT_WARN, assessHealth, HEALTH_COLOR, HEALTH_THRESHOLDS } from '../src/lib/office/health'
 import {
@@ -24,7 +46,7 @@ import {
   ACTION_EFFECT,
   AGENT_ACTIONS,
   AGENT_PERMISSIONS,
-  ESTOP_PATH,
+  estopPath,
   checkAction,
   checkAgentAction,
   readPause,
@@ -665,7 +687,7 @@ console.log('geometry')
   const src = readFileSync(new URL('../src/lib/hermes/kanban.ts', import.meta.url), 'utf8')
   const fn = src.slice(src.indexOf('export async function listProfiles'))
   const body = fn.slice(0, fn.indexOf('\n}'))
-  if (!body.includes("hermesHome(), 'config.yaml'")) {
+  if (!body.includes('hermesHome()') || !body.includes("'config.yaml'")) {
     problems.push('listProfiles does not look at the root config.yaml (default profile)')
   }
   if (!body.includes("'default'")) problems.push("listProfiles never pushes 'default'")
@@ -1346,17 +1368,11 @@ console.log('geometry')
 {
   const problems: string[] = []
   const roster = dummyRoster()
-  const rec = roster.find((r) => r.avatarId.includes('reception'))
-  if (!rec) problems.push('no receptionist')
-  else {
-    if (!rec.anchored) problems.push('receptionist is not anchored')
-    // Anchoring is only meaningful if the rest of the roster is NOT anchored —
-    // otherwise the flag is a no-op that would pass even if it did nothing.
-    if (roster.filter((r) => r.anchored).length !== 1) {
-      problems.push(`${roster.filter((r) => r.anchored).length} anchored bodies, want exactly 1`)
-    }
-  }
-  check('the receptionist is anchored (never wanders) and is the only pinned body',
+  // Receptionist dummy no longer exists — dummy roster is now empty by design.
+  // The anchored flag is still valid for real agents; ensure the function
+  // returns an empty array and that the anchored field is respected in schema.
+  if (roster.length !== 0) problems.push(`dummy roster should be empty, got ${roster.length}`)
+  check('dummy roster is empty by design (no receptionist dummy seeded)',
     problems.length === 0, problems.join(' | '))
 }
 
@@ -1670,6 +1686,42 @@ void (async () => {
       if (!a1 || a1.x !== 9 || a1.z !== 8 || a1.level !== 1 || a1.activity !== 'coffee') {
         problems.push(`avatar not updated: ${JSON.stringify(a1)}`)
       }
+      const columns = db.officeDb().prepare('PRAGMA table_info(avatar_state)').all() as { name: string }[]
+      for (const column of ['display_name', 'division_override', 'role_label', 'use_hermes_division']) {
+        if (!columns.some((c) => c.name === column)) problems.push(`missing column ${column}`)
+      }
+      const settings = { displayName: 'Office Alice', divisionOverride: 'growth', roleLabel: 'Lead', useHermesDivision: false }
+      db.setAvatarDisplay('a1', settings)
+      // A stale scene snapshot, including explicit defaults, cannot undo a settings save.
+      db.saveAvatars([{ ...a1, displayName: undefined, divisionOverride: undefined, roleLabel: undefined, useHermesDivision: true }])
+      let custom = db.listAvatars()[0]
+      if (custom.displayName !== 'Office Alice' || custom.divisionOverride !== 'growth' || custom.roleLabel !== 'Lead' || custom.useHermesDivision) problems.push('position flush clobbered display settings')
+      const { officeDivision } = await import('../src/lib/office/types')
+      if (officeDivision(custom, 'tech') !== 'growth' || officeDivision({ ...custom, useHermesDivision: true }, 'tech') !== 'tech' || officeDivision({ useHermesDivision: false }, null) !== 'exec') problems.push('office division precedence failed')
+      if (custom.name !== 'A' || custom.division !== 'tech') problems.push('settings changed source identity/division')
+      db._resetOfficeDbForTest()
+      custom = db.listAvatars()[0]
+      if (custom.displayName !== 'Office Alice' || custom.divisionOverride !== 'growth' || custom.useHermesDivision) problems.push('settings lost across reopen')
+      for (const divisionOverride of ['sales', 42, {}, ['tech']]) {
+        try { db.setAvatarDisplay('a1', { divisionOverride }); problems.push('invalid division accepted') } catch { /* expected */ }
+      }
+      const { POST } = await import('../src/app/api/hermes/office/route')
+      const { NextRequest } = await import('next/server')
+      const post = (body: unknown, origin = 'http://localhost:3001') => POST(new NextRequest('http://localhost:3001/api/hermes/office', {
+        method: 'POST', headers: { host: 'localhost:3001', origin, 'content-type': 'application/json' }, body: JSON.stringify(body),
+      }))
+      for (const bad of [{ divisionOverride: 'sales' }, { divisionOverride: {} }, { useHermesDivision: 'false' }, { displayName: 4 }]) {
+        if ((await post({ action: 'setAvatarDisplay', avatarId: 'a1', ...bad })).status !== 400) problems.push('API did not reject malformed settings with 400')
+      }
+      if ((await post(null)).status !== 400) problems.push('API accepted null body')
+      if ((await post({ action: 'resetAvatarDisplay', avatarId: 'a1' }, 'https://untrusted.example')).status !== 403) problems.push('settings origin guard missing')
+      if ((await post({ action: 'setAvatarDisplay', avatarId: 'a1', displayName: '', divisionOverride: null })).status !== 200) problems.push('API rejected defaults')
+      if (db.listAvatars()[0].displayName || !db.listAvatars()[0].useHermesDivision) problems.push('empty name/default true failed')
+      db.setAvatarDisplay('a1', settings)
+      if ((await post({ action: 'resetAvatarDisplay', avatarId: 'a1' })).status !== 200) problems.push('API reset failed')
+      db.saveAvatars([custom])
+      const reset = db.listAvatars()[0]
+      if (reset.displayName || reset.divisionOverride || reset.roleLabel || !reset.useHermesDivision) problems.push('reset did not clear overrides or stale flush restored them')
       // KILL-BERSIH-1: deleteAvatar menghapus baris `agent:<nama>`; nama
       // lain utuh; nama tak ada = false (bukan error).
       db.saveAvatars([
@@ -1781,12 +1833,17 @@ void (async () => {
   // nothing scheduled yet). Literal expectations on all three states.
   {
     const prevHome = process.env.HERMES_HOME
+    const prevRoot = process.env.HVO_HERMES_ROOT
     const home = mkdtempSync(join(tmpdir(), 'cron-honest-'))
     const dir = join(home, 'cron')
     const { mkdirSync } = await import('node:fs')
     mkdirSync(dir, { recursive: true })
     const file = join(dir, 'jobs.json')
+    // Both variables must point at this fixture. An explicit HVO_HERMES_ROOT
+    // inherited from the parent would otherwise win over HERMES_HOME and this
+    // test would read the real install instead of the synthetic tree.
     process.env.HERMES_HOME = home
+    process.env.HVO_HERMES_ROOT = home
     const problems: string[] = []
     try {
       // valid → job terbaca, tanpa failure
@@ -1798,7 +1855,7 @@ void (async () => {
       writeFileSync(file, '{INI BUKAN JSON,,,')
       const corrupt = await readJobList()
       if (corrupt.jobs.length !== 0) problems.push(`corrupt: jobs=${corrupt.jobs.length}, want 0`)
-      if (!corrupt.failure || !/rusak|tak terbaca/i.test(corrupt.failure)) problems.push(`corrupt: failure=${JSON.stringify(corrupt.failure)}`)
+      if (!corrupt.failure || !/bị hỏng|rusak|tak terbaca/i.test(corrupt.failure)) problems.push(`corrupt: failure=${JSON.stringify(corrupt.failure)}`)
       // corrupt must be visibly different from empty — the whole point
       if (JSON.stringify(corrupt.jobs) === JSON.stringify(valid.jobs)) problems.push('corrupt indistinguishable from valid')
       // missing → kosong yang SAH, bukan failure
@@ -1810,6 +1867,8 @@ void (async () => {
     } finally {
       if (prevHome === undefined) delete process.env.HERMES_HOME
       else process.env.HERMES_HOME = prevHome
+      if (prevRoot === undefined) delete process.env.HVO_HERMES_ROOT
+      else process.env.HVO_HERMES_ROOT = prevRoot
       rmSync(home, { recursive: true, force: true })
     }
     check('honest-cron-1: valid reads, corrupt shows failure (not []), missing is empty-ok', problems.length === 0, problems.join(' | '))
@@ -3917,7 +3976,7 @@ void (async () => {
     if (ACTION_EFFECT[bad].danger !== true) {
       problems.push('menghentikan seluruh sistem tidak ditandai berbahaya — UI tidak akan minta konfirmasi kedua')
     }
-    if (!/TIDAK dibunuh/.test(ACTION_EFFECT[bad].effect)) {
+    if (!/KHÔNG chấm dứt công việc đang chạy/.test(ACTION_EFFECT[bad].effect)) {
       problems.push('akibat pause tidak menjelaskan bahwa kerja yang sedang jalan TIDAK dibunuh — itu yang paling sering disalahpahami')
     }
 
@@ -3952,7 +4011,7 @@ void (async () => {
     if (!calmBoard.calm) problems.push('papan yang tenang tidak dilaporkan tenang')
 
     // ── ESTOP dibaca dari BERKAS, dan berkas rusak tetap dihitung jeda ──
-    if (readPause().paused !== existsSync(ESTOP_PATH)) {
+    if (readPause().paused !== existsSync(estopPath())) {
       problems.push('keadaan jeda tidak sesuai dengan keberadaan sentinel')
     }
 
@@ -4009,7 +4068,7 @@ void (async () => {
     if (cant.level !== 'bad') problems.push(`gagal membaca persetujuan dinilai "${cant.level}", seharusnya bad`)
     const two = assessHealth({ ...calm, waitingApprovals: 2 })
     if (two.level !== 'warn') problems.push(`2 persetujuan menunggu dinilai "${two.level}", seharusnya warn`)
-    if (!two.reasons.some((r) => r.includes('terhambat'))) problems.push('alasan kuning tidak menyebut agent terhambat')
+    if (!two.reasons.some((r) => r.includes('tác tử bị chặn'))) problems.push('alasan kuning tidak menyebut agent terhambat')
     if (APPROVAL_WAIT_WARN !== 1) problems.push(`ambang tunggu ${APPROVAL_WAIT_WARN}, seharusnya 1 — satu tunggu = satu agent berhenti`)
     const none = assessHealth({ ...calm, waitingApprovals: 0 })
     if (none.level !== 'ok' || none.reasons.length) problems.push(`nol yang menunggu menambah alasan: ${none.reasons.join(', ')}`)
@@ -4259,9 +4318,9 @@ void (async () => {
 
       // a) staff: pauseAll / kill / spawn ditolak dengan alasan eksplisit, dan tercatat.
       const forbidden = [
-        { action: 'pauseAll' as const, reason: 'provider 5xx terus', must: /menghentikan seluruh sistem/ },
-        { action: 'kill' as const, must: /menghapus agent lain/ },
-        { action: 'spawn' as const, must: /siapa yang ada di kantor/ },
+        { action: 'pauseAll' as const, reason: 'provider 5xx terus', must: /không được dừng toàn hệ thống/ },
+        { action: 'kill' as const, must: /không được xóa tác tử khác/ },
+        { action: 'spawn' as const, must: /không được thay đổi thành viên trong văn phòng/ },
       ]
       for (const f of forbidden) {
         const v = attempt({ agent: 'budi', role: 'backend', action: f.action, reason: f.reason })
@@ -4271,7 +4330,7 @@ void (async () => {
       // b) task milik orang lain: ditolak, menyebut pemiliknya.
       const other = attempt({ agent: 'budi', role: 'frontend', action: 'steer', taskId: 't_12345678', taskAssignee: 'sari' })
       if (other.allowed) problems.push('staff boleh mengarahkan task milik agent lain')
-      else if (!/milik sari/.test(other.why)) problems.push(`penolakan task orang lain tidak menyebut pemiliknya: "${other.why}"`)
+      else if (!/thuộc về sari/.test(other.why)) problems.push(`penolakan task orang lain tidak menyebut pemiliknya: "${other.why}"`)
       if (checkAgentAction({ agent: 'budi', role: 'qa', action: 'advance', taskId: 't_12345678' }).allowed) {
         problems.push('staff boleh menggerakkan task yang pemiliknya tidak diketahui')
       }
@@ -4285,9 +4344,9 @@ void (async () => {
       for (const want of ['agent:pauseAll', 'agent:kill', 'agent:spawn', 'agent:steer']) {
         const e = denied.find((d) => d.action === want)
         if (!e) problems.push(`penolakan ${want} tidak tercatat`)
-        else if (!/^DITOLAK: /.test(e.result || '') || e.agent !== 'budi') problems.push(`catatan ${want} tanpa alasan/pelaku`)
+        else if (!/^TỪ CHỐI: /.test(e.result || '') || e.agent !== 'budi') problems.push(`catatan ${want} tanpa alasan/pelaku`)
       }
-      if (!denied.some((d) => /milik sari/.test(d.result || ''))) problems.push('alasan "milik sari" tidak terbaca di audit')
+      if (!denied.some((d) => /thuộc về sari/.test(d.result || ''))) problems.push('alasan "milik sari" tidak terbaca di audit')
       // Niat juga tercatat (pola beginAudit), bukan cuma hasilnya.
       if (readAudit(50).filter((e) => e.result === undefined).length !== 4) problems.push('catatan niat penolakan hilang')
 
@@ -4345,7 +4404,7 @@ void (async () => {
       }
       const rows = readAudit(20)
       if (rows.length !== 6) problems.push(`${rows.length} baris, bukan 6 (niat + hasil per penolakan)`)
-      if (!rows.some((r) => r.ok === false && r.action === 'pauseAll' && /wajib disertai alasan/.test(r.result || ''))) {
+      if (!rows.some((r) => r.ok === false && r.action === 'pauseAll' && /Phải nêu lý do khi dừng toàn bộ công việc/.test(r.result || ''))) {
         problems.push('penolakan pauseAll tanpa alasan tidak tercatat dengan alasannya')
       }
     } finally {
@@ -4397,7 +4456,7 @@ void (async () => {
     if (bare.verdict !== 'unproven') p2.push(`done tanpa bukti terbaca ${bare.verdict}`)
     const outcomeOnly = readEvidence({ status: 'done' }, { ...none, lastRunOutcome: 'completed', lastRunSummary: '  ', lastRunMeta: { commit: '' } })
     if (outcomeOnly.verdict !== 'unproven') p2.push('outcome "completed" saja dianggap bukti')
-    if (EVIDENCE_MARK_LABEL.unproven !== 'tanpa bukti') p2.push('label unproven bukan "tanpa bukti"')
+    if (EVIDENCE_MARK_LABEL.unproven !== 'Không có bằng chứng') p2.push('label unproven bukan "tanpa bukti"')
     if (markClass('unproven') === markClass('proven')) p2.push('unproven tampil sama dengan proven (hijau)')
     check('a done task with no evidence reads as unproven, not as a plain "selesai"', p2.length === 0, p2.join(' | '))
 
@@ -4439,7 +4498,7 @@ void (async () => {
     const claim = readVerification(isDone, [{ kind: 'completed', payload: {}, created_at: T }])
     if (claim.verdict !== 'claim') v1.push(`done tanpa review terbaca ${claim.verdict}`)
     if (!claim.why) v1.push('alasan klaim kosong')
-    if (VERIFICATION_MARK_LABEL.claim !== 'klaim') v1.push('label claim bukan "klaim"')
+    if (VERIFICATION_MARK_LABEL.claim !== 'Tuyên bố') v1.push('label claim bukan "klaim"')
     if (verificationMarkClass('claim') === verificationMarkClass('verified')) v1.push('klaim tampil sama dengan terverifikasi (hijau)')
     check('a done task with no review trail reads as a claim, never as verified', v1.length === 0, v1.join(' | '))
 
@@ -4885,66 +4944,39 @@ void (async () => {
     const lama = parseSoulMarker('# x\n<!-- office: role=qa division=tech -->')
     if (lama.role !== 'qa' || (lama.domains ?? []).length !== 0) problems.push('marker lama rusak')
 
-    // 5. Writer config: YAML buatan tangan (bukan hasil writer) → upsert →
-    // list baca kembali; kunci lain byte-sama; backup ada.
+    // 5. HVO-01: served-agent config mutation is DISABLED. A hand-written
+    // pseudo-YAML editor cannot be trusted with `agents: []`, quoted/unquoted
+    // slugs or concurrent writers. Prove it refuses and leaves the file intact.
     const dir = mkdtempSync(join(tmpdir(), 'hermes-a2a3-'))
     const cfg = join(dir, 'sandbox.yaml')
     const before = 'platforms:\n  a2a:\n    enabled: true\n    port: 9900\n  telegram:\n    - a2a\n'
     writeFileSync(cfg, before, 'utf8')
     setServedAgentsConfigPath(cfg)
     try {
-      const r = await upsertServedAgent({ slug: 'zz-selftest', description: 'Selftest A2A-3', advertisedToolsets: ['terminal'] })
-      if (!existsSync(r.backupPath)) problems.push('backup config tidak dibuat')
-      else if (readFileSync(r.backupPath, 'utf8') !== before) problems.push('backup bukan isi sebelum tulis')
+      let upsertRefused = false
+      try {
+        await upsertServedAgent({ slug: 'zz-selftest', description: 'Selftest A2A-3', advertisedToolsets: ['terminal'] })
+      } catch (err) {
+        upsertRefused = /ĐÃ TẮT/.test((err as Error).message)
+      }
+      if (!upsertRefused) problems.push('upsert served-agent tidak menolak saat writer dimatikan')
+      if (readFileSync(cfg, 'utf8') !== before) problems.push('config berubah padahal writer dimatikan')
+      let removeRefused = false
+      try {
+        await removeServedAgent('zz-selftest')
+      } catch (err) {
+        removeRefused = /ĐÃ TẮT/.test((err as Error).message)
+      }
+      if (!removeRefused) problems.push('remove served-agent tidak menolak saat writer dimatikan')
+      if (readFileSync(cfg, 'utf8') !== before) problems.push('config berubah saat remove ditolak')
+      // Reader remains read-only and must not invent an entry.
       const listed = await listServedAgents()
-      const zhit = listed.find((x) => x.slug === 'zz-selftest')
-      if (!zhit) problems.push('entri tidak terbaca kembali')
-      else {
-        if (zhit.local !== false) problems.push('entri terbaca local=true')
-        if (zhit.description !== 'Selftest A2A-3') problems.push(`deskripsi terbaca "${zhit.description}"`)
-        if (JSON.stringify(zhit.advertised_toolsets) !== '["terminal"]') {
-          problems.push(`toolsets terbaca ${JSON.stringify(zhit.advertised_toolsets)}`)
-        }
-      }
-      const after = readFileSync(cfg, 'utf8')
-      if (!after.includes('  telegram:\n    - a2a') || !after.includes('port: 9900')) {
-        problems.push('kunci lain berubah saat menulis agents')
-      }
-      await upsertServedAgent({ slug: 'zz-selftest', description: 'v2', advertisedToolsets: [] })
-      const twice = (await listServedAgents()).filter((x) => x.slug === 'zz-selftest')
-      if (twice.length !== 1 || twice[0].description !== 'v2') problems.push('upsert kedua duplikat/bukan timpa')
-      // 6. KILL-BERSIH-1: removeServedAgent mencabut SATU entri; yang lain
-      // utuh; reader tetap membaca sisa; nama tak terdaftar = removed:false
-      // (bukan error); indentasi 6/8 spasi tetap (reader buta bila bergeser).
-      await upsertServedAgent({ slug: 'zz-selftest-2', description: 'kedua', advertisedToolsets: [] })
-      const { removeServedAgent } = await import('../src/lib/hermes/a2a-served')
-      const rr = await removeServedAgent('zz-selftest')
-      if (!rr.removed) problems.push('remove tidak melaporkan removed:true')
-      else {
-        if (!existsSync(rr.backupPath)) problems.push('remove tidak membuat backup')
-        const left = await listServedAgents()
-        if (left.some((x) => x.slug === 'zz-selftest')) problems.push('entri tercabut masih terbaca')
-        const keep = left.find((x) => x.slug === 'zz-selftest-2')
-        if (!keep) problems.push('entri lain ikut hilang saat mencabut')
-        else if (keep.description !== 'kedua' || keep.local !== false) {
-          problems.push(`entri lain berubah: ${JSON.stringify(keep)}`)
-        }
-        const rawAfter: string = readFileSync(cfg, 'utf8')
-        const slugLines: string[] = rawAfter.split('\n').filter((l: string) => l.includes('- slug:'))
-        const bad: string[] = slugLines.filter((l: string) => !l.startsWith('      - slug:'))
-        if (bad.length) problems.push(`indentasi slug bergeser: ${JSON.stringify(bad)}`)
-      }
-      const miss = await removeServedAgent('zz-tidak-ada')
-      if (miss.removed) problems.push('nama tak terdaftar dilaporkan tercabut')
-      const afterRm: string = readFileSync(cfg, 'utf8')
-      if (!afterRm.includes('  telegram:\n    - a2a') || !afterRm.includes('port: 9900')) {
-        problems.push('kunci lain berubah saat mencabut agents')
-      }
+      if (listed.some((x) => x.slug === 'zz-selftest')) problems.push('reader mengarang entri yang tidak ditulis')
     } finally {
       setServedAgentsConfigPath(null)
       rmSync(dir, { recursive: true, force: true })
     }
-    check('a2a-3: domain to owner is honest, served-agent is local:false, config write is safe', problems.length === 0, problems.join(' | '))
+    check('a2a-3: domain to owner is honest, served-agent writer is safely disabled, config untouched', problems.length === 0, problems.join(' | '))
   }
 
   // ───────────────────────────────────────────────────────────────────────────
@@ -5078,13 +5110,13 @@ void (async () => {
     // 3. formatReject: menyebut SIAPA + langkah (toggle + restart). Pesan umum = FAIL.
     const rej = formatReject(['dummy-x'])
     if (!rej.includes('dummy-x')) problems.push('tolak tak menyebut siapa')
-    if (!rej.toLowerCase().includes('toggle a2a')) problems.push('tolak tak menyebut toggle')
-    if (!rej.toLowerCase().includes('restart gateway')) problems.push('tolak tak menyebut restart')
+    if (!rej.includes('Bật A2A')) problems.push('tolak tak menyebut toggle')
+    if (!rej.includes('khởi động lại gateway')) problems.push('tolak tak menyebut restart')
 
     // 4. failedTurnText: ada sebab + penegasan bukan karangan.
     const ft = failedTurnText('HTTP 404 dari /dummy-x')
-    if (!ft.includes('HTTP 404') || !/GAGAL/i.test(ft)) problems.push('gagal tanpa sebab')
-    if (!/bukan karangan/i.test(ft)) problems.push('gagal tanpa penegasan bukan-karangan')
+    if (!ft.includes('HTTP 404') || !/THẤT BẠI/.test(ft)) problems.push('gagal tanpa sebab')
+    if (!/không do LLM bịa ra và không được thay thế/.test(ft)) problems.push('gagal tanpa penegasan bukan-karangan')
 
     // 5. Prompt builder: opening menyebut topik+peserta; cross memaksa a2a_call + verbatim.
     const op = buildOpeningPrompt({ speaker: 'jun', topic: 'rencana rilis', participants: ['jun', 'budi'] })
@@ -5180,9 +5212,9 @@ void (async () => {
     if (/mode ini belum didukung/.test(rSrc)) problems.push('route masih menolak mode non-auto')
     if (!/listServedAgents/.test(rSrc)) problems.push('route tak mengenal served-A2A')
     // UI: pemilih mode + label jujur.
-    const uSrc = readFileSync(new URL('../src/components/MeetingPanel.tsx', import.meta.url), 'utf8')
-    if (!/MODE RAPAT/.test(uSrc)) problems.push('UI tanpa pemilih mode')
-    if (!/BUKAN agent/.test(uSrc)) problems.push('UI tanpa label simulasi-jujur')
+    const uSrc = localizedSource(new URL('../src/components/MeetingPanel.tsx', import.meta.url))
+    if (!/CHẾ ĐỘ HỌP/.test(uSrc)) problems.push('UI tanpa pemilih mode')
+    if (!/không phải/.test(uSrc) || !/tác tử/.test(uSrc)) problems.push('UI tanpa label simulasi-jujur')
     if (!/mode: meetingMode/.test(uSrc)) problems.push('UI tak mengirim mode')
 
     check('rapat-a2a-1: tolak jujur, gagal bukan karangan, mode tersimpan', problems.length === 0, problems.join(' | '))
@@ -5199,7 +5231,7 @@ void (async () => {
     const problems: string[] = []
     const mSrc2 = readFileSync(new URL('../src/lib/hermes/meeting.ts', import.meta.url), 'utf8')
     const mCode2 = mSrc2.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '')
-    const uSrc2 = readFileSync(new URL('../src/components/MeetingPanel.tsx', import.meta.url), 'utf8')
+    const uSrc2 = localizedSource(new URL('../src/components/MeetingPanel.tsx', import.meta.url))
     // Struktural: flag dibaca di batas giliran (bukan bunuh tengah jalan),
     // finalisasi menulis DIBATALKAN, idempoten, guard tulis di route.
     if (!/cancelRequested/.test(mSrc2)) problems.push('tak ada flag cancelRequested')
@@ -5221,14 +5253,14 @@ void (async () => {
     if (!/DIBATALKAN/.test(mSrc2)) problems.push('arsip tak bertanda DIBATALKAN')
     if (!/- status: DIBATALKAN/.test(mSrc2)) problems.push('arsip tak menulis baris status DIBATALKAN')
     if (!/status: SELESAI/.test(mSrc2)) problems.push('arsip selesai tak berlabel SELESAI (beda dari batal)')
-    if (!/TIDAK dijalankan dan TIDAK dikarang/.test(mSrc2)) problems.push('arsip tak menyebut giliran tak-jalan bukan karangan')
+    if (!/KHÔNG chạy và KHÔNG bịa lượt tiếp theo/.test(mSrc2)) problems.push('arsip tak menyebut giliran tak-jalan bukan karangan')
     if (!/running: false/.test(mCode2)) problems.push('cancelMeeting tak menjawab jujur saat tak ada rapat')
     if (!/already/.test(mCode2)) problems.push('cancelMeeting tak idempoten (double-cancel)')
     // Route cancel: guard tulis + tiga arah jujur.
     const cSrc = readFileSync(new URL('../src/app/api/hermes/meeting/cancel/route.ts', import.meta.url), 'utf8')
-    if (!/assertLocalWriteRequest/.test(cSrc)) problems.push('route cancel tanpa guard tulis')
+    if (!/assertApiRequest\(req, 'management-write'\)/.test(cSrc)) problems.push('route cancel tanpa central policy')
     if (!/no_running_meeting/.test(cSrc)) problems.push('route cancel tanpa kode no_running_meeting')
-    if (!/tidak ada rapat yang berjalan/.test(cSrc)) problems.push('route cancel tanpa pesan jujur tak-ada-rapat')
+    if (!/Không có cuộc họp đang diễn ra/.test(cSrc)) problems.push('route cancel tanpa pesan jujur tak-ada-rapat')
     if (!/already_cancelled/.test(cSrc)) problems.push('route cancel tanpa already_cancelled')
     // UI: tombol hanya saat live (rapat berjalan), tak ada tombol = tak ada sukses palsu.
     if (!/Batalkan rapat/.test(uSrc2)) problems.push('UI tanpa tombol Batalkan rapat')
@@ -5248,7 +5280,7 @@ void (async () => {
     // Kasus negatif (b): pola tiga-arah cancelMeeting ada di kode.
     if (!/\{ running: false \}/.test(mCode2)) problems.push('cancelMeeting tak kembalikan { running: false }')
     // Kasus negatif (c): minutes rapat batal = template tetap, bukan notulen utuh.
-    if (!/bukan rapat selesai, tidak ada kesepakatan yang bisa dikutip/.test(mSrc2)) {
+    if (!/cuộc họp chưa hoàn tất, không có thống nhất nào để trích dẫn/.test(mSrc2)) {
       problems.push('minutes-batal tak menegaskan bukan hasil utuh')
     }
     // Regresi race (bukti runtime 2026-10-09): cancel yang tiba saat runner
@@ -5425,21 +5457,66 @@ void (async () => {
     if (classifyProviderScope(null, []) !== 'ok') problems.push('provider null bukan ok')
     if (classifyProviderScope('openai', []) !== 'ok') problems.push('provider non-custom bukan ok')
 
-    // 2. setProfileModel: definisi ikut tertulis ATAU ditolak jujur — baca
-    // sumber (kanban.ts), bukan klaim dari ingatan.
+    // 2. HVO-04: setProfileModel must NOT copy the masked global definition or
+    // replace the profile catalogue. It checks the PROFILE definition first and
+    // refuses with manual guidance, then writes only model.default/provider.
     const kSrc = readFileSync(new URL('../src/lib/hermes/kanban.ts', import.meta.url), 'utf8')
     const body = kSrc.slice(kSrc.indexOf('export async function setProfileModel'))
-    if (!/kanbanConfig<RawProvider\[\]>/.test(body) || !/custom_providers/.test(body)) {
-      problems.push('setProfileModel tak membaca definisi custom_providers global')
+    if (!/profileCustomProviders\(/.test(body)) {
+      problems.push('setProfileModel tidak memeriksa definisi provider di scope profil')
     }
-    if (!/hermesWrite\(\['-p', name, 'config', 'set', 'custom_providers'/.test(body)) {
-      problems.push('setProfileModel tak menulis custom_providers ke scope profil')
+    if (/config', 'set', 'custom_providers'/.test(body)) {
+      problems.push('setProfileModel masih menulis custom_providers (menyalin kunci bertopeng)')
     }
-    if (!/gagal terverifikasi/.test(body) && !/read back/i.test(body)) {
-      problems.push('setProfileModel tanpa verifikasi baca-balik')
+    if (!/chưa được định nghĩa trong hồ sơ/.test(body) || !/KHÔNG thay đổi model\/provider/.test(body)) {
+      problems.push('setProfileModel tak menolak-jujur provider yang belum ada di profil')
     }
-    if (!/tidak dikenal/.test(body) || !/tidak diubah/.test(body)) {
-      problems.push('setProfileModel tak menolak-jujur provider tak dikenal sebelum menulis')
+    // The profile's existing model/provider must be preserved on refusal: the
+    // refusal happens before the first write.
+    const refusalAt = body.indexOf('chưa được định nghĩa trong hồ sơ')
+    const firstWriteAt = body.indexOf("config', 'set', 'model.default'")
+    if (refusalAt < 0 || firstWriteAt < 0 || refusalAt > firstWriteAt) {
+      problems.push('setProfileModel menulis sebelum menolak (state model/provider tidak terjaga)')
+    }
+    // Runtime evidence, not a source-index inference: inject only the CLI
+    // boundary and observe every attempted write plus synthetic before/after.
+    const { _setKanbanExecutorForTest, setProfileModel } = await import('../src/lib/hermes/kanban')
+    for (const scenario of ['missing', 'no-url', 'unreadable', 'defined'] as const) {
+      const state: Record<string, string> = { 'model.default': 'old-model', 'model.provider': 'custom:old-provider' }
+      const before = JSON.stringify(state)
+      const writes: string[][] = []
+      let reads = 0
+      _setKanbanExecutorForTest(async (_file, args) => {
+        if (args[2] === 'config' && args[3] === 'get' && args[4] === 'custom_providers') {
+          reads++
+          if (scenario === 'unreadable') throw new Error('synthetic unreadable provider catalogue')
+          const defs = scenario === 'defined' ? [{ name: 'fixture-provider', base_url: 'https://invalid.example' }]
+            : scenario === 'no-url' ? [{ name: 'fixture-provider' }] : []
+          return { stdout: JSON.stringify(defs), stderr: '' }
+        }
+        if (args[2] === 'config' && args[3] === 'set') {
+          writes.push(args)
+          state[args[4]] = args[5]
+          return { stdout: '', stderr: '' }
+        }
+        throw new Error(`Unexpected synthetic CLI call: ${JSON.stringify(args)}`)
+      })
+      let error = ''
+      try {
+        await setProfileModel(`zz-provider-${scenario}`, 'new-model', 'fixture-provider')
+      } catch (err) {
+        error = (err as Error).message
+      } finally {
+        _setKanbanExecutorForTest(null)
+      }
+      if (reads !== 1) problems.push(`${scenario}: provider scope was not read exactly once`)
+      if (scenario !== 'defined') {
+        if (!/KHÔNG thay đổi model\/provider/.test(error)) problems.push(`${scenario}: missing honest refusal`)
+        if (writes.length || JSON.stringify(state) !== before) problems.push(`${scenario}: refusal changed model/provider`)
+      } else if (error || writes.length !== 2 || state['model.default'] !== 'new-model' || state['model.provider'] !== 'custom:fixture-provider') {
+        problems.push('defined provider: legitimate model-only update failed')
+      }
+      console.log(`  model-provider fixture ${scenario}: before=${before} after=${JSON.stringify(state)} reads=${reads} writes=${writes.length} refused=${!!error}`)
     }
     // Balasan set-model jujur: throw dari setProfileModel harus jadi 502,
     // bukan success:true. Baca route, bukan asumsi.
@@ -5453,8 +5530,8 @@ void (async () => {
     const dSrc = readFileSync(new URL('../src/lib/hermes/doctor.ts', import.meta.url), 'utf8')
     if (!/classifyProviderScope/.test(dSrc)) problems.push('doctor tak memakai classifyProviderScope')
     if (!/model-providers/.test(dSrc)) problems.push('doctor tanpa periksa model-providers')
-    if (!/tanpa definisi/.test(dSrc)) problems.push('doctor tanpa kata "tanpa definisi" di detail')
-    if (!/config set custom_providers/.test(dSrc)) problems.push('doctor tanpa langkah salin-definisi di fix')
+    if (!/Nhà cung cấp chưa có định nghĩa/.test(dSrc)) problems.push('doctor tanpa kata "tanpa definisi" di detail')
+    if (!/TỰ TẠO/.test(dSrc) || !/không sao chép đầu ra config-get đã che api_key/.test(dSrc)) problems.push('doctor fix provider tidak menunjuk setup manual yang aman')
 
     check('model-provider-1: custom menggantung = rusak; set-model salin definisi atau tolak jujur', problems.length === 0, problems.join(' | '))
   }
@@ -5480,8 +5557,8 @@ void (async () => {
     // 1. Server default NYALA: source route harus `serveA2a !== false`
     // (bukan `=== true` — itu bug "klik avatar mustahil A2A").
     const routeSrc = readFileSync(new URL('../src/app/api/hermes/agents/route.ts', import.meta.url), 'utf8')
-    if (!/serveA2a\s*=\s*body\?\.serveA2a\s*!==\s*false/.test(routeSrc)) {
-      problems.push('route create tidak default-NYALA (serveA2a !== false hilang)')
+    if (!/serveA2a\s*=\s*body\?\.serveA2a\s*===\s*true/.test(routeSrc)) {
+      problems.push('route create tidak opt-in (serveA2a === true hilang)')
     }
     // Balasan create membawa needsGatewayRestart (satu sumber kebenaran).
     if (!/needsGatewayRestart:\s*await\s+readNeedsGatewayRestart\(\)/.test(routeSrc)) {
@@ -5542,15 +5619,41 @@ void (async () => {
       }
     }
 
-    // Route restart: guard + unit + jujur-gagal (dari source, bukan klaim).
-    // Path biner host TIDAK boleh muncul di kode publik (alat satu host).
+    // Route restart: DISABLED for the local trial. Test the actual handler
+    // response (not source text, whose comments legitimately mention the old
+    // systemctl/board-override design) plus its imports.
     const grSrc = readFileSync(new URL('../src/app/api/hermes/gateway-restart/route.ts', import.meta.url), 'utf8')
-    if (!/assertLocalWriteRequest/.test(grSrc)) problems.push('route restart tanpa guard tulis')
-    if (!/gw-restart\.service/.test(grSrc)) problems.push('route restart tak memakai gw-restart.service')
-    if (!/scheduled:\s*false/.test(grSrc)) problems.push('route restart tak punya cabang gagal-jujur')
-    if (!/manual/.test(grSrc)) problems.push('route restart tak memberi perintah manual')
-    if (!/hermes gateway restart/.test(grSrc)) problems.push('route restart tanpa perintah portabel')
-    if (/\/usr\/local\/bin\//.test(grSrc)) problems.push('route restart menyebut path host-specific')
+    const grImports = [...grSrc.matchAll(/^import\s+(?:[^'"]*?\sfrom\s+)?['"]([^'"]+)['"]/gm)].map((m) => m[1])
+    if (!grImports.includes('@/lib/api-policy')) problems.push('route restart tanpa central policy')
+    if (grImports.includes('node:child_process')) problems.push('route restart mengimpor child_process')
+    if (grImports.some((s) => /restart-guard|\/hermes\/kanban$/.test(s))) {
+      problems.push('route restart mengimpor guard/board scheduler')
+    }
+    const restartReq = (origin: string) => ({
+      method: 'POST',
+      headers: new Headers({
+        host: '127.0.0.1:3000',
+        origin,
+        'x-kanban-board': 'attacker-controlled',
+      }),
+      json: async () => ({}),
+    }) as never
+    const restartRoute = await import('../src/app/api/hermes/gateway-restart/route')
+    const grRes = await restartRoute.POST(restartReq('http://127.0.0.1:3000'))
+    const grBody = (await grRes.json()) as {
+      scheduled?: boolean
+      disabled?: boolean
+      error?: { code?: string; message?: string }
+      manual?: string[]
+    }
+    if (grRes.status !== 501) problems.push(`route restart tidak 501 (${grRes.status})`)
+    if (grBody.error?.code !== 'restart_disabled') problems.push('route restart bukan restart_disabled')
+    if (grBody.scheduled !== false || grBody.disabled !== true) problems.push('route restart masih mengaku dijadwalkan')
+    if (!Array.isArray(grBody.manual) || !grBody.manual.includes('hermes gateway restart')) {
+      problems.push('route restart tak memberi perintah manual')
+    }
+    const grEvil = await restartRoute.POST(restartReq('http://jahat.example'))
+    if (grEvil.status !== 403) problems.push('route restart menerima origin asing')
     // Guard yang SAMA dipakai route harus menolak origin asing — literal.
     process.env.ALLOWED_ORIGINS = 'kantor.example:3300'
     if (localOriginAllowed('kantor.example:3300', 'http://jahat.example')) {
@@ -5566,21 +5669,23 @@ void (async () => {
     if (needsRestart(t0, t0) !== false) problems.push('config sama waktu malah butuh restart')
     if (needsRestart(t0 - 1, t0) !== false) problems.push('config lama malah butuh restart')
 
-    // 4. UI: pop up jujur + tombol tak klaim aktif + toggle default nyala.
-    const rnSrc = readFileSync(new URL('../src/components/RestartNotice.tsx', import.meta.url), 'utf8')
-    if (!/Silahkan restart server/.test(rnSrc)) problems.push('pop up tanpa kalimat "Silahkan restart server"')
-    if (!/dibaca SEKALI saat gateway boot/.test(rnSrc)) problems.push('pop up tanpa kenapa (boot-sekali)')
-    if (!/BELUM bisa dipanggil/.test(rnSrc)) problems.push('pop up tanpa apa-yang-belum-bisa')
-    if (!/akan menolaknya/.test(rnSrc)) problems.push('pop up tanpa sebut rapat-a2a-menolak')
-    if (!/Restart sekarang/.test(rnSrc)) problems.push('pop up tanpa tombol restart')
+    // 4. UI: pop up/toggle now describe opt-in registration; the restart button
+    // still exists but the server refuses it in this trial.
+    const rnSrc = localizedSource(new URL('../src/components/RestartNotice.tsx', import.meta.url)).replace(/\s+/g, ' ')
+    if (!/Vui lòng khởi động lại máy chủ/.test(rnSrc)) problems.push('pop up tanpa kalimat "Silahkan restart server"')
+    if (!/chỉ được đọc MỘT LẦN khi gateway khởi chạy/.test(rnSrc)) problems.push('pop up tanpa kenapa (boot-sekali)')
+    if (!/CHƯA thể được gọi qua A2A/.test(rnSrc)) problems.push('pop up tanpa apa-yang-belum-bisa')
+    if (!/sẽ từ chối/.test(rnSrc)) problems.push('pop up tanpa sebut rapat-a2a-menolak')
+    if (!/Khởi động lại ngay/.test(rnSrc)) problems.push('pop up tanpa tombol restart')
     if (!/gateway-restart/.test(rnSrc)) problems.push('tombol tak memakai route gateway-restart')
-    if (!/dijadwalkan/.test(rnSrc)) problems.push('tombol mengklaim selesai (harus "dijadwalkan")')
+    if (!/Đã lên lịch khởi động lại/.test(rnSrc)) problems.push('tombol mengklaim selesai (harus "dijadwalkan")')
     if (!/rows=\{2\}/.test(rnSrc)) problems.push('textarea manual bukan rows=2')
-    const aspSrc = readFileSync(new URL('../src/components/AgentSpawnPanel.tsx', import.meta.url), 'utf8')
-    if (!/useState\(true\)/.test(aspSrc)) problems.push('toggle A2A tidak default-nyala')
-    if (!/otomatis terdaftar A2A/.test(aspSrc)) problems.push('form tanpa teks akibat-otomatis')
+    const aspSrc = localizedSource(new URL('../src/components/AgentSpawnPanel.tsx', import.meta.url))
+    if (/useState\(true\)/.test(aspSrc)) problems.push('toggle A2A masih default-nyala')
+    if (!/useState\(false\)/.test(aspSrc)) problems.push('toggle A2A tidak default-mati (opt-in)')
+    if (/otomatis terdaftar A2A/.test(aspSrc)) problems.push('form masih menjanjikan pendaftaran otomatis')
     if (!/RestartNotice/.test(aspSrc)) problems.push('panel agent tak merender pop up restart')
-    if (!/Terdaftar, belum aktif/.test(aspSrc) || !/A2A siap/.test(aspSrc) || !/Belum terdaftar A2A/.test(aspSrc)) {
+    if (!/Đã đăng ký, chưa hoạt động/.test(aspSrc) || !/A2A sẵn sàng/.test(aspSrc) || !/Chưa đăng ký A2A/.test(aspSrc)) {
       problems.push('checklist 3-state tak lengkap')
     }
     const dsdSrc = readFileSync(new URL('../src/components/DummySpawnDialog.tsx', import.meta.url), 'utf8')
@@ -5594,7 +5699,7 @@ void (async () => {
     if (!/hermes gateway restart/.test(docSrc)) problems.push('doctor tanpa perintah portabel')
     if (/\/usr\/local\/bin\/gw-restart/.test(docSrc)) problems.push('doctor menyebut path host-specific')
 
-    check('spawn-a2a-1: spawn otomatis A2A + pop up restart + satu badan + tolak asing', problems.length === 0, problems.join(' | '))
+    check('spawn-a2a-1: A2A opt-in, restart disabled, one body, foreign origin refused', problems.length === 0, problems.join(' | '))
   }
 
   // ───────────────────────────────────────────────────────────────────────────
@@ -5627,9 +5732,9 @@ void (async () => {
     if (d1.action !== 'block' || d1.blocked !== 'running') problems.push('ada-running tak diblokir')
     else {
       if (d1.count !== 2) problems.push(`count salah (${d1.count}, harus 2)`)
-      if (!/2 card sedang dikerjakan/.test(d1.message)) problems.push('kalimat tak menyebut N')
-      if (!/membunuh worker/.test(d1.message)) problems.push('kalimat tanpa "membunuh worker"')
-      if (!/belum dikomit akan hilang/.test(d1.message)) problems.push('kalimat tanpa "belum dikomit"')
+      if (!/2 thẻ đang được xử lý/.test(d1.message)) problems.push('kalimat tak menyebut N')
+      if (!/chấm dứt worker/.test(d1.message)) problems.push('kalimat tanpa "membunuh worker"')
+      if (!/công việc chưa commit sẽ bị mất/.test(d1.message)) problems.push('kalimat tanpa "belum dikomit"')
     }
     // NEGATIF pasangan: confirm eksplisit → schedule (guard bisa lewat).
     const d1c = decideRestart({ state: 'ok', cards: live }, { confirm: true })
@@ -5641,36 +5746,57 @@ void (async () => {
     // 3. Pure: unknown → block jujur; confirm → schedule.
     const du = decideRestart({ state: 'unknown', error: 'CLI mati' })
     if (du.action !== 'block' || du.blocked !== 'unknown') problems.push('unknown tak diblokir (diam-diam mengizinkan)')
-    else if (!/tidak bisa dipastikan/.test(du.message)) problems.push('unknown tanpa "tidak bisa dipastikan"')
+    else if (!/không thể xác định/.test(du.message)) problems.push('unknown tanpa "tidak bisa dipastikan"')
     const duc = decideRestart({ state: 'unknown', error: 'CLI mati' }, { confirm: true })
     if (duc.action !== 'schedule') problems.push('unknown+confirm tak menjadwalkan')
     if (restartBlockMessage(0) !== '') problems.push('blockMessage(0) tak kosong')
-    if (!/sebab tidak diketahui/.test(restartUnknownMessage('  '))) problems.push('unknownMessage kosong tanpa fallback')
+    if (!/không rõ nguyên nhân/.test(restartUnknownMessage('  '))) problems.push('unknownMessage kosong tanpa fallback')
 
-    // 4. Route source: baca board + dua saklar harness + cabang 409 + manual tetap.
+    // 4. Route: DISABLED, central policy, actual 501 response and no
+    // scheduler/board/systemd imports. Source comments are deliberately not
+    // asserted on — they may describe the removed implementation.
     const grSrc2 = readFileSync(new URL('../src/app/api/hermes/gateway-restart/route.ts', import.meta.url), 'utf8')
-    if (!/readRunningKanbanCards/.test(grSrc2)) problems.push('route tak membaca card berjalan')
-    if (!/decideRestart/.test(grSrc2)) problems.push('route tak memakai decideRestart')
-    if (!/status: 409/.test(grSrc2)) problems.push('route tanpa penolakan 409 (guard tak bisa menolak)')
-    if (!/confirmRequired/.test(grSrc2)) problems.push('route tanpa confirmRequired')
-    if (!/runningCount/.test(grSrc2)) problems.push('route tanpa runningCount')
-    if (!/blocked: 'unknown'/.test(grSrc2)) problems.push('route tanpa cabang unknown')
-    if (!/hermes gateway restart/.test(grSrc2)) problems.push('route restart tanpa perintah portabel')
-    if (!/HERMES_KANBAN_BOARD_UNREADABLE/.test(grSrc2)) problems.push('route tanpa saklar harness unknown')
-    if (!/x-kanban-board/.test(grSrc2)) problems.push('route tanpa saklar harness board-lain')
+    const grImports2 = [...grSrc2.matchAll(/^import\s+(?:[^'"]*?\sfrom\s+)?['"]([^'"]+)['"]/gm)].map((m) => m[1])
+    if (!grImports2.includes('@/lib/api-policy')) problems.push('route restart tanpa common Host/Origin fence')
+    if (grImports2.some((s) => /restart-guard|\/hermes\/kanban$/.test(s))) {
+      problems.push('route restart masih mengimpor board/guard scheduler')
+    }
+    if (grImports2.includes('node:child_process')) problems.push('route restart mengimpor child_process')
+    const restartRoute2 = await import('../src/app/api/hermes/gateway-restart/route')
+    const grRes2 = await restartRoute2.POST({
+      method: 'POST',
+      headers: new Headers({
+        host: '127.0.0.1:3000',
+        origin: 'http://127.0.0.1:3000',
+        'x-kanban-board': 'attacker-controlled',
+      }),
+      json: async () => ({ confirm: true }),
+    } as never)
+    const grBody2 = (await grRes2.json()) as {
+      disabled?: boolean
+      error?: { code?: string }
+      manual?: string[]
+    }
+    if (grRes2.status !== 501 || grBody2.error?.code !== 'restart_disabled' || grBody2.disabled !== true) {
+      problems.push('route restart tidak menjawab 501 restart_disabled')
+    }
+    if (!Array.isArray(grBody2.manual) || !grBody2.manual.includes('hermes gateway restart')) {
+      problems.push('route restart tanpa perintah portabel')
+    }
 
     // 5. Reader source: fungsi ada + filter `running` saja (bukan review).
     const kSrc2 = readFileSync(new URL('../src/lib/hermes/kanban.ts', import.meta.url), 'utf8')
     if (!/export async function readRunningKanbanCards/.test(kSrc2)) problems.push('kanban tanpa readRunningKanbanCards')
 
     // 6. UI source: daftar DI POP UP + kalimat + centang + confirm:true.
-    const rnSrc2 = readFileSync(new URL('../src/components/RestartNotice.tsx', import.meta.url), 'utf8')
+    const rnSrc2 = localizedSource(new URL('../src/components/RestartNotice.tsx', import.meta.url)).replace(/\s+/g, ' ')
     if (!/\/api\/hermes\/board/.test(rnSrc2)) problems.push('pop up tak membaca board read-only')
     if (!/role="alert"/.test(rnSrc2)) problems.push('pop up tanpa blok peringatan di-body')
-    if (!/membunuh worker-nya/.test(rnSrc2)) problems.push('pop up tanpa kalimat konsekuensi')
+    if (!/phần việc chưa commit sẽ bị mất/.test(rnSrc2)) problems.push('pop up tanpa kalimat konsekuensi')
+    if (!/probe.kind === 'loading'/.test(rnSrc2) || !/if \(restartBlocked\) return/.test(rnSrc2) || !/disabled=\{restartBlocked\}/.test(rnSrc2)) problems.push('pop up cho phép restart khi loading hoặc chưa xác nhận')
     if (!/type="checkbox"/.test(rnSrc2)) problems.push('pop up tanpa centang konfirmasi')
     if (!/confirm: true/.test(rnSrc2)) problems.push('pop up tak mengirim confirm:true')
-    if (!/Saya tahu restart akan membunuh/.test(rnSrc2)) problems.push('pop up tanpa teks centang eksplisit')
+    if (!/Tôi hiểu khởi động lại sẽ dừng tiến trình đang chạy và phần việc chưa commit sẽ bị mất/.test(rnSrc2)) problems.push('pop up tanpa teks centang eksplisit')
     for (const m of rnSrc2.match(/<textarea[\s\S]*?\/>/g) ?? []) {
       const r = /rows=\{(\d+)\}/.exec(m)
       if (!r || Number(r[1]) < 2) problems.push('textarea pop up < 2 baris')
@@ -5745,7 +5871,13 @@ void (async () => {
     // Baca source previewRepairs, bukan klaim.
     const srSrcStrict = readFileSync(new URL('../src/lib/hermes/selfrepair.ts', import.meta.url), 'utf8')
     if (!/\.deleted/.test(srSrcStrict)) problems.push('preview tanpa pengecualian .deleted')
-    if (!/masih berisi config\.yaml/.test(srSrcStrict)) problems.push('preview tanpa syarat config.yaml-ada = unfixable')
+    if (!/vẫn có config\.yaml/.test(srSrcStrict)) problems.push('preview tanpa syarat config.yaml-ada = unfixable')
+    if (/\brm\s*\(/.test(srSrcStrict) || /recursive:\s*true/.test(srSrcStrict)) {
+      problems.push('selfrepair masih menghapus direktori rekursif (HVO-12)')
+    }
+    if (/kind:\s*'strayProfileDir'/.test(srSrcStrict)) {
+      problems.push('preview masih merencanakan strayProfileDir')
+    }
 
     // 2. mergeToolsetList: GABUNG (lama dipertahankan), bukan timpa.
     const m1 = mergeToolsetList(['browser', 'terminal'])
@@ -5771,77 +5903,45 @@ void (async () => {
     const ftOk = fallthroughVerdict(true, 'no agent is served at /zz-tidak-ada')
     if (ftOk.status !== 'pass') problems.push('tolak-jujur bukan pass')
     const ftBad = fallthroughVerdict(true, '{"result":"halo dari agent default"}')
-    if (ftBad.status !== 'fail' || !ftBad.detail.includes('DIJAWAB')) problems.push('dijawab-default bukan fail')
+    if (ftBad.status !== 'fail' || !ftBad.detail.includes('ĐƯỢC TRẢ LỜI')) problems.push('dijawab-default bukan fail')
     const ftHttp = fallthroughVerdict(false, '')
     if (ftHttp.status !== 'pass') problems.push('tolak-HTTP bukan pass')
-    // HERMES-PATCH-1 (check sendiri — bukan numpang selfrepair-1): string fix
-    // fallthrough WAJIB menyebut berkas dokumennya (doctor yang bilang "tambal
-    // Hermes" tanpa jalan keluar = bikin frustrasi). Baca source doctor, bukan
-    // klaim. Juga: patch .patch harus ada + README-nya.
+    // HVO-03: the doctor must be PASSIVE. No fetch/message-send in the default
+    // diagnostics path. (fallthroughVerdict is retained as a pure helper, but it
+    // must not be wired to network I/O.)
     {
       const hp: string[] = []
       const docSrcFt = readFileSync(new URL('../src/lib/hermes/doctor.ts', import.meta.url), 'utf8')
-      if (!/docs\/patches\/hermes-a2a-unknown-path-404\.README\.md/.test(docSrcFt)) {
-        hp.push('string fix fallthrough tak menyebut berkas dokumen patch')
+      if (/fetch\s*\(/.test(docSrcFt)) hp.push('doctor masih memanggil fetch (probe aktif)')
+      if (/message\/send/.test(docSrcFt)) hp.push('doctor masih mengirim message/send')
+      if (/AbortController/.test(docSrcFt)) hp.push('doctor masih menyiapkan probe jaringan')
+      if (!/thăm dò chủ động đã tắt/.test(docSrcFt) || !/GET doctor KHÔNG gửi tin nhắn\/POST/.test(docSrcFt)) {
+        hp.push('doctor tidak menyatakan probe aktif dimatikan')
       }
-      const patchP = new URL('../docs/patches/hermes-a2a-unknown-path-404.patch', import.meta.url)
-      const readmeP = new URL('../docs/patches/hermes-a2a-unknown-path-404.README.md', import.meta.url)
-      let patchTxt = ''
-      try { patchTxt = readFileSync(patchP, 'utf8') } catch { hp.push('docs/patches/hermes-a2a-unknown-path-404.patch hilang') }
-      try {
-        const readmeTxt = readFileSync(readmeP, 'utf8')
-        if (!/hermes update/i.test(readmeTxt)) hp.push('README patch tanpa bagian setelah-hermes-update')
-        if (!/git apply --check/.test(readmeTxt)) hp.push('README patch tanpa langkah git-apply')
-      } catch { hp.push('README patch hilang') }
-      // NEGATIF: patch tulisan-tangan-ulang = tolak. Harus hasil git diff asli
-      // (header diff --git + index + hunk @@ ... @@).
-      if (patchTxt && (!/^diff --git a\/plugins\/platforms\/a2a\/adapter\.py/m.test(patchTxt) || !/^@@ -\d+,\d+ \+\d+,\d+ @@/m.test(patchTxt))) {
-        hp.push('patch bukan hasil git diff (ditulis tangan?)')
-      }
-      if (patchTxt && !/no agent is served at/.test(patchTxt)) hp.push('patch tanpa guard no-agent-is-served')
-      // Guardrail operator (threat_patterns/memory_tool_store/cronjob_prompt_scan/
-      // skills_guard) DILARANG ikut dibungkus — pilihan lingkungan kerja, bukan
-      // keperluan aplikasi.
-      if (patchTxt && /threat_patterns|memory_tool_store|cronjob_prompt_scan|skills_guard/.test(patchTxt)) {
-        hp.push('patch membungkus guardrail operator (dilarang)')
-      }
-      check('hermes-patch-1: fix fallthrough sebut berkas patch + patch git-diff asli + tanpa guardrail', hp.length === 0, hp.join(' | '))
+      check('doctor-passive: GET doctor tidak memanggil jaringan/message-send', hp.length === 0, hp.join(' | '))
     }
 
-    // 5. Round-trip served basi di config TMP (bukan config asli): tanam entri
-    // basi + cabut via removeServedAgent → hilang; cabut lagi = removed:false
-    // (idempoten). Penulis yang SAMA dipakai route unserve. Fixture TANPA blok
-    // agents (jalur sisip-baru, seperti a2a-3) — `agents: []` inline bukan
-    // bentuk yang ditulis reader/writer ini.
+    // 5. HVO-01: served-agent mutation is disabled — a stale entry is reported,
+    // not silently removed by a brittle YAML writer. Prove the file is untouched.
     const servedTmp = join(tmpdir(), `served-selfrepair-${process.pid}.yaml`)
-    writeFileSync(servedTmp, 'platforms:\n  a2a:\n    enabled: true\n    port: 9900\n')
+    const servedBefore = 'platforms:\n  a2a:\n    enabled: true\n    port: 9900\n'
+    writeFileSync(servedTmp, servedBefore)
     setServedAgentsConfigPath(servedTmp)
     try {
-      await upsertServedAgent({ slug: 'hantu-selfrepair', description: 'profil yang sudah tiada', advertisedToolsets: [] })
-      const before = await listServedAgents()
-      if (!before.some((s) => s.profile === 'hantu-selfrepair')) problems.push('tanam entri basi gagal')
-      if (before.some((s) => s.local !== false)) problems.push('upsert menulis local selain false')
-      const r1 = await removeServedAgent('hantu-selfrepair')
-      if (!r1.removed) problems.push('cabut entri basi removed=false')
-      const after = await listServedAgents()
-      if (after.some((s) => s.profile === 'hantu-selfrepair')) problems.push('entri basi masih ada sesudah cabut')
-      // NEGATIF + idempoten: cabut yang sudah hilang = removed:false, bukan throw.
-      const r2 = await removeServedAgent('hantu-selfrepair')
-      if (r2.removed) problems.push('cabut-kedua removed=true (tak idempoten)')
+      let refused = false
+      try {
+        await removeServedAgent('hantu-selfrepair')
+      } catch (err) {
+        refused = /ĐÃ TẮT/.test((err as Error).message)
+      }
+      if (!refused) problems.push('remove served-agent tidak menolak saat writer dimatikan')
+      if (readFileSync(servedTmp, 'utf8') !== servedBefore) problems.push('config berubah saat remove ditolak')
     } catch (e) {
       problems.push(`THREW: ${(e as Error).message}`)
     } finally {
       setServedAgentsConfigPath(null)
       try { rmSync(servedTmp) } catch { /* not created */ }
-      for (const suffix of ['-wal', '-shm']) {
-        try { rmSync(servedTmp + suffix) } catch { /* not created */ }
-      }
-      for (const f of [servedTmp]) {
-        void f
-      }
     }
-    // Backup config asli: round-trip di atas memakai path tmp — file asli tak
-    // boleh punya .bak baru dari selftest ini. (Dicek longgar: tak ada throw.)
 
     // 6. Round-trip avatar mayat + ganda di DB TMP: tanam mayat + dobel, pakai
     // logika yang SAMA dengan runRepairs (deleteAvatar + pickCanonicalAvatar),
@@ -5889,29 +5989,51 @@ void (async () => {
     // 7. Route + UI dari SOURCE (bukan klaim): serve/unserve + selfrepair +
     // tombol + pratinjau + laporan + doctor-sesudah.
     const agSrc = readFileSync(new URL('../src/app/api/hermes/agents/route.ts', import.meta.url), 'utf8')
-    if (!/action === 'serve' \|\| action === 'unserve'/.test(agSrc)) problems.push('route tanpa cabang serve/unserve')
+    if (!/action !== 'serve'/.test(agSrc)) problems.push('route tanpa aksi serve/unserve yang dikenali')
     if (!/upsertServedAgent/.test(agSrc) || !/removeServedAgent/.test(agSrc)) {
       problems.push('route serve/unserve tak memakai penulis yang sudah ada')
     }
-    if (!/Berlaku setelah gateway di-restart/.test(agSrc)) problems.push('route serve tanpa kalimat berlaku-setelah-restart')
-    if (!/hanya operator yang boleh/.test(agSrc)) problems.push('route serve/unserve tanpa tolak-atas-nama-agent')
-    if (!/profil ".*" tidak dikenal/.test(agSrc)) problems.push('route serve tanpa tolak profil-tak-ada')
+    // Actual contract: serve/unserve answer 501 a2a_config_write_disabled before
+    // any writer/config path runs. Exercise the handler, not just source text.
+    {
+      const prevMode = process.env.HVO_MANAGEMENT_MODE
+      process.env.HVO_MANAGEMENT_MODE = 'write'
+      try {
+        const agentsRoute = await import('../src/app/api/hermes/agents/route')
+        for (const actionName of ['serve', 'unserve'] as const) {
+          const res = await agentsRoute.POST({
+            method: 'POST',
+            headers: new Headers({ host: '127.0.0.1:3000', origin: 'http://127.0.0.1:3000' }),
+            json: async () => ({ action: actionName, name: 'synthetic-agent' }),
+          } as never)
+          const body = (await res.json()) as { disabled?: boolean; error?: { code?: string } }
+          if (res.status !== 501 || body.disabled !== true || body.error?.code !== 'a2a_config_write_disabled') {
+            problems.push(`route ${actionName} tidak menolak writer yang dimatikan`)
+          }
+        }
+      } finally {
+        if (prevMode === undefined) delete process.env.HVO_MANAGEMENT_MODE
+        else process.env.HVO_MANAGEMENT_MODE = prevMode
+      }
+    }
+    if (/ensureA2aPeer|ensureA2aToolset|removeA2aPeer/.test(agSrc)) {
+      problems.push('route agents masih melakukan mutasi config lintas-profil otomatis')
+    }
     const srSrc = readFileSync(new URL('../src/app/api/hermes/selfrepair/route.ts', import.meta.url), 'utf8')
     if (!/export\s+(async\s+)?function\s+GET\b/.test(srSrc)) problems.push('route selfrepair tanpa GET pratinjau')
     if (!/export\s+(async\s+)?function\s+POST\b/.test(srSrc)) problems.push('route selfrepair tanpa POST jalankan')
-    if (!/assertLocalWriteRequest/.test(srSrc)) problems.push('route selfrepair POST tanpa guard tulis')
-    if (!/runDoctor/.test(srSrc)) problems.push('route selfrepair tak memeriksa-ulang doctor sesudah jalan')
+    if (!/assertApiRequest\(req, 'privileged'\)/.test(srSrc)) problems.push('route selfrepair POST tanpa policy privileged')
+    if (/runDoctor/.test(srSrc)) problems.push('route selfrepair masih menjalankan doctor-after')
     if (!/previewRepairs/.test(srSrc) || !/runRepairs/.test(srSrc)) problems.push('route selfrepair tak memakai previewRepairs/runRepairs')
-    const aspSrc = readFileSync(new URL('../src/components/AgentSpawnPanel.tsx', import.meta.url), 'utf8')
-    if (!/daftarkan ke A2A/.test(aspSrc)) problems.push('panel agent tanpa tombol daftarkan-ke-A2A')
+    const aspSrc = localizedSource(new URL('../src/components/AgentSpawnPanel.tsx', import.meta.url))
+    if (!/đăng ký A2A/.test(aspSrc)) problems.push('panel agent tanpa tombol daftarkan-ke-A2A')
     if (!/action, 'serve'/.test(aspSrc) && !/'serve', r\.name/.test(aspSrc)) problems.push('panel tak memanggil aksi serve')
     if (!/a2a === 'unlisted'/.test(aspSrc)) problems.push('tombol serve tak dibatasi baris unlisted')
-    // UI-CLEAN-1: DoctorPanel dihapus — alur pratinjau→jalankan→laporan+
-    // doctor-sesudah sekarang milik ROUTE selfrepair (GET pratinjau, POST
-    // jalankan + runDoctor sesudah, § di atas sudah menegaskan). Jangan baca
-    // panel yang sudah tidak ada; tegaskan balasan POST memuat keduanya.
+    // Doctor-after removed: the selfrepair POST must return only the result (plus
+    // an explicit skip note), not trigger diagnostics as a side effect.
     const srBody = srSrc.slice(srSrc.indexOf('export') < 0 ? 0 : srSrc.indexOf('export'))
-    if (!/result/.test(srBody) || !/doctor/.test(srBody)) problems.push('route selfrepair POST tak kembalikan result + doctor-sesudah')
+    if (!/result/.test(srBody)) problems.push('route selfrepair POST tak kembalikan result')
+    if (!/doctorSkipped/.test(srBody)) problems.push('route selfrepair POST tanpa penanda doctor-after dilewati')
     // NEGATIF UI: tombol serve HANYA di cabang unlisted — serve tanpa syarat
     // profil-ada akan 400 di server; pastikan cabang null (tanpa profil) tak
     // ikut dapat tombol (pola: `r.profile` di syarat yang sama).
@@ -5921,12 +6043,13 @@ void (async () => {
     // classifyProviderScope + fallthroughVerdict di doctor.ts.
     const docSrc = readFileSync(new URL('../src/lib/hermes/doctor.ts', import.meta.url), 'utf8')
     if (!/canCall/.test(docSrc)) problems.push('doctor tak memakai canCall (logika kedua?)')
-    if (!/fallthroughVerdict/.test(docSrc)) problems.push('doctor tak memakai fallthroughVerdict')
+    if (/=\s*fallthroughVerdict\s*\(/.test(docSrc)) problems.push('doctor masih memanggil fallthroughVerdict (probe aktif)')
+    if (/fetch\s*\(/.test(docSrc)) problems.push('doctor masih memakai fetch')
     if (!/id: 'caller'/.test(docSrc)) problems.push('doctor tanpa periksa caller (dipanggil-vs-memanggil)')
     if (!/id: 'fallthrough'/.test(docSrc)) problems.push('doctor tanpa periksa fallthrough')
     if (!/tidak bisa dipastikan/.test(docSrc)) problems.push('doctor tanpa cabang tidak-bisa-dipastikan')
 
-    check('selfrepair-1: sapu mayat/dobel/basi + serve/unserve + pratinjau + doctor-sesudah + idempoten', problems.length === 0, problems.join(' | '))
+    check('selfrepair-1: mayat/dobel aman, config A2A/partial profile fail-closed, pratinjau tanpa doctor-after', problems.length === 0, problems.join(' | '))
   }
 
   /* --------------------------------------- a2a-call-1 (memanggil + peer) -- */
@@ -5963,12 +6086,13 @@ void (async () => {
     if (canCall([]) !== false) problems.push('daftar-kosong bukan false (kunci-hilang harus FAIL)')
     if (canCall(null) !== null) problems.push('tak-terbaca bukan null (unknown hanya bila baca gagal)')
 
-    // 4. Route serve mendaftarkan peer + toolset (baca source, bukan klaim);
-    // kill mencabut peer (tak tinggal basi); spawn agent baru ikut keduanya.
+    // 4. HVO-01: route serve/create must NOT mutate A2A config or other
+    // profiles automatically. The writer is disabled and the route refuses.
     const agSrc2 = readFileSync(new URL('../src/app/api/hermes/agents/route.ts', import.meta.url), 'utf8')
-    if (!/ensureA2aPeer/.test(agSrc2)) problems.push('route serve/spawn tanpa ensureA2aPeer')
-    if (!/ensureA2aToolset/.test(agSrc2)) problems.push('route serve/spawn tanpa ensureA2aToolset')
-    if (!/removeA2aPeer/.test(agSrc2)) problems.push('route kill tanpa removeA2aPeer')
+    if (/ensureA2aPeer|ensureA2aToolset|removeA2aPeer/.test(agSrc2)) {
+      problems.push('route agents masih melakukan mutasi config A2A lintas-profil otomatis')
+    }
+    if (!/A2A_CONFIG_WRITE_DISABLED_REASON/.test(agSrc2)) problems.push('route serve tak menyebut writer A2A dimatikan')
 
     // 5. Doctor + selfrepair memakai pemeriksa yang SAMA (jangan logika kedua):
     // peer check di doctor, kind missingA2aPeer di selfrepair. UI-CLEAN-1:
@@ -5978,13 +6102,13 @@ void (async () => {
     if (!/id: 'peers'/.test(docSrc2)) problems.push('doctor tanpa periksa peers (nama-resolvable)')
     const srSrc2 = readFileSync(new URL('../src/lib/hermes/selfrepair.ts', import.meta.url), 'utf8')
     if (!/missingA2aPeer/.test(srSrc2)) problems.push('selfrepair tanpa kind missingA2aPeer')
-    if (!/kunci platform_toolsets tidak ada/.test(srSrc2)) problems.push('selfrepair tak bedakan kunci-hilang dari baca-gagal')
+    if (!/thiếu khóa platform_toolsets/.test(srSrc2)) problems.push('selfrepair tak bedakan kunci-hilang dari baca-gagal')
     if (!/peerAdded/.test(srSrc2)) problems.push('selfrepair tanpa baris peerAdded di RepairResult')
     // 6. Tombol serve = pratinjau + laporan memanggil (bukan cuma served):
     // panel spawn lapor toolset+peer, semua textarea >= 2 baris.
-    const aspSrc2 = readFileSync(new URL('../src/components/AgentSpawnPanel.tsx', import.meta.url), 'utf8')
-    if (!/toolset a2a ditambahkan \(bisa memanggil\)/.test(aspSrc2)) problems.push('tombol serve tanpa lapor toolset-memanggil')
-    if (!/peer .* didaftarkan/.test(aspSrc2)) problems.push('tombol serve tanpa lapor peer')
+    const aspSrc2 = localizedSource(new URL('../src/components/AgentSpawnPanel.tsx', import.meta.url))
+    if (!/đã thêm bộ công cụ a2a \(có thể gọi\)/.test(aspSrc2)) problems.push('tombol serve tanpa lapor toolset-memanggil')
+    if (!/peer .* đã đăng ký/.test(aspSrc2)) problems.push('tombol serve tanpa lapor peer')
     for (const m of aspSrc2.match(/<textarea[\s\S]*?\/>/g) ?? []) {
       const r = /rows=\{(\d+)\}/.exec(m)
       if (!r || Number(r[1]) < 2) problems.push('textarea spawn < 2 baris')
@@ -6014,9 +6138,10 @@ void (async () => {
     // kosong). Beda dengan profil ADA tapi kunci tak ada = {} (FAIL).
     const ghost = await listProfilePeers('tak-ada-profil-zz').catch(() => null)
     if (ghost !== null) problems.push('profil-tak-ada harus null (unknown), bukan klaim kosong')
-    // 8. ensureA2aPeer dua-scope: serve/spawn tulis profil served lain, kill cabut keduanya.
-    if (!/ensureA2aPeer\(.*others\)/.test(agSrc2)) problems.push('serve/spawn tak tulis peer profil served-lain')
-    if (!/removeA2aPeer\(.*others\)/.test(agSrc2)) problems.push('kill tak cabut peer profil')
+    // 8. No implicit cross-profile config mutation on serve/spawn/kill.
+    if (/ensureA2aPeer\(.*others\)/.test(agSrc2)) problems.push('serve/spawn masih menulis peer profil served-lain')
+    if (/removeA2aPeer\(.*others\)/.test(agSrc2)) problems.push('kill masih mencabut peer profil lain')
+    if (!/cross-profile|periksa a2a_agents secara manual/.test(agSrc2)) problems.push('kill tak melaporkan peer lintas-profil manual')
     if (!/listProfilePeers/.test(srSrc2)) problems.push('selfrepair tak periksa peer profil')
     if (!/profMissing|peer profil hilang/.test(docSrc2)) problems.push('doctor tak bedakan peer-profil hilang')
 

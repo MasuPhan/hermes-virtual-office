@@ -21,14 +21,16 @@
  * kegagalannya baru ketahuan saat dibutuhkan.
  */
 
-import { existsSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
-import { homedir } from 'node:os'
+import { closeSync, existsSync, openSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { ProviderStat } from './providers'
 import { MIN_SAMPLES } from './providers'
+import { resolveFleetRoot } from './root'
 
-const HERMES = process.env.HERMES_HOME || join(homedir(), '.hermes')
-const CONFIG = join(HERMES, 'config.yaml')
+/** Resolved per call, so tests and an explicit HVO_HERMES_ROOT agree. */
+function configPath(): string {
+  return join(resolveFleetRoot(process.env), 'config.yaml')
+}
 
 export type FallbackEntry = { provider: string; model: string }
 
@@ -49,6 +51,7 @@ export type FallbackPlan =
  * berisiko merusak apa pun.
  */
 export function readFallback(): FallbackEntry[] {
+  const CONFIG = configPath()
   if (!existsSync(CONFIG)) return []
   try {
     const text = readFileSync(CONFIG, 'utf8')
@@ -107,10 +110,10 @@ export function planFallback(providers: ProviderStat[], primary = 'custom:9route
     const almost = providers.filter((p) => p.failures === 0 && p.calls > 0 && p.calls < MIN_SAMPLES)
     const why =
       almost.length > 0
-        ? `belum ada provider dengan sampel cukup (minimal ${MIN_SAMPLES} panggilan). Yang mendekati: ${almost
+        ? `Chưa có nhà cung cấp đủ mẫu (tối thiểu ${MIN_SAMPLES} lần gọi). Gần đạt: ${almost
             .map((p) => `${p.provider} (${p.calls})`)
             .join(', ')}`
-        : 'tidak ada provider lain yang pernah dipakai sama sekali — cadangan tidak bisa disusun dari data yang tidak ada'
+        : 'Chưa từng sử dụng nhà cung cấp nào khác — không thể lập dự phòng khi không có dữ liệu'
     return { kind: 'none', current, why }
   }
 
@@ -119,7 +122,7 @@ export function planFallback(providers: ProviderStat[], primary = 'custom:9route
     kind: 'propose',
     current,
     proposed: [{ provider: normalize(best.provider), model: best.models[0] }],
-    why: `${best.provider}: ${best.calls} panggilan, ${best.failures} gagal (${(best.failureRate * 100).toFixed(1)}%) — lebih jarang gagal daripada ${primary}${primaryStat ? ` (${(primaryStat.failureRate * 100).toFixed(1)}%)` : ''}. Model dari yang benar-benar dipakai lewat provider itu.`,
+    why: `${best.provider}: ${best.calls} lần gọi, ${best.failures} thất bại (${(best.failureRate * 100).toFixed(1)}%) — tỷ lệ lỗi thấp hơn ${primary}${primaryStat ? ` (${(primaryStat.failureRate * 100).toFixed(1)}%)` : ''}. Mô hình lấy từ các mô hình thực sự đã dùng qua nhà cung cấp đó.`,
   }
 }
 
@@ -137,11 +140,39 @@ function normalize(p: string): string {
  * Ada cadangan berkas sebelum menulis: berkas yang salah tulis berarti seluruh instalasi
  * kehilangan konfigurasinya, dan itu bukan harga yang pantas untuk sebuah tombol.
  */
+/**
+ * Create a backup with explicit 0600 and exclusive create (`wx`).
+ *
+ * HVO-13: a plain `writeFileSync` inherits the process umask, so under umask 022
+ * a full config backup could be world-readable even when the source was 0600.
+ * `wx` also refuses to overwrite an existing file, so two writers cannot race
+ * onto the same backup path.
+ */
+export function createSecureBackup(configFile: string, content: string): string {
+  const backup = `${configFile}.bak-sebelum-fallback-${Date.now()}-${process.pid}`
+  let fd: number | null = null
+  try {
+    fd = openSync(backup, 'wx', 0o600)
+    writeFileSync(fd, content, 'utf8')
+    return backup
+  } catch (err) {
+    if (fd !== null) {
+      try { closeSync(fd) } catch { /* already closed */ }
+      try { unlinkSync(backup) } catch { /* not created */ }
+    }
+    throw new Error(`Không thể tạo bản sao lưu cấu hình an toàn: ${(err as Error).message}`)
+  } finally {
+    if (fd !== null) {
+      try { closeSync(fd) } catch { /* already closed */ }
+    }
+  }
+}
+
 export function applyFallback(entries: FallbackEntry[]): { backup: string } {
-  if (!existsSync(CONFIG)) throw new Error(`config.yaml tidak ditemukan di ${CONFIG}`)
-  const backup = `${CONFIG}.bak-sebelum-fallback-${Date.now()}`
+  const CONFIG = configPath()
+  if (!existsSync(CONFIG)) throw new Error(`Không tìm thấy config.yaml tại ${CONFIG}`)
   const original = readFileSync(CONFIG, 'utf8')
-  writeFileSync(backup, original, 'utf8')
+  const backup = createSecureBackup(CONFIG, original)
 
   const lines = original.split('\n')
   const start = lines.findIndex((l) => /^fallback_providers\s*:/.test(l))
@@ -161,7 +192,10 @@ export function applyFallback(entries: FallbackEntry[]): { backup: string } {
   return { backup }
 }
 
-export { CONFIG as CONFIG_PATH }
+/** Config path for diagnostics/tests; resolved from the explicit fleet root. */
+export function configPathFor(): string {
+  return configPath()
+}
 
 /** Dipakai tes: hapus berkas cadangan yang dibuat `applyFallback`. */
 export function dropBackup(path: string): void {

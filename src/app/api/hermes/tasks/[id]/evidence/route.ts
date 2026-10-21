@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getTaskEvidence } from '@/lib/hermes/kanban'
+import { assertApiRequest } from '@/lib/api-policy'
 
 export const dynamic = 'force-dynamic'
 
@@ -8,7 +9,9 @@ export const dynamic = 'force-dynamic'
  * lampiran. Gagal membaca `show` = 502, BUKAN daftar bukti kosong — panel harus bisa
  * membedakan "tidak ada bukti" dari "tidak tahu".
  */
-export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
+export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
+  const denied = assertApiRequest(req, 'read')
+  if (denied) return denied
   const { id } = await ctx.params
   try {
     return NextResponse.json(await getTaskEvidence(id))

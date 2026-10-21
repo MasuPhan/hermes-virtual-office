@@ -3,6 +3,7 @@ import { readErrors, readStatus, readUsage } from '@/lib/hermes/observability'
 import { assessHealth } from '@/lib/office/health'
 import { readProviders } from '@/lib/hermes/providers'
 import { planFallback } from '@/lib/hermes/fallback'
+import { assertApiRequest } from '@/lib/api-policy'
 
 export const dynamic = 'force-dynamic'
 
@@ -20,6 +21,8 @@ export const dynamic = 'force-dynamic'
  * menampilkan angka lama seolah-olah sekarang adalah panel yang berbohong.
  */
 export async function GET(req: NextRequest) {
+  const denied = assertApiRequest(req, 'read')
+  if (denied) return denied
   const days = Math.min(365, Math.max(1, Number(req.nextUrl.searchParams.get('days') || 30)))
   const hours = Math.min(720, Math.max(1, Number(req.nextUrl.searchParams.get('hours') || 24)))
   try {

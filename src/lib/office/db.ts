@@ -18,9 +18,11 @@
  */
 import { DatabaseSync } from 'node:sqlite'
 import { mkdirSync } from 'node:fs'
+import { DOOR } from './layout'
+import { isSafeProfileName } from '../hermes/profile-name'
 import { dirname, resolve } from 'node:path'
 import type { AgentDivision } from '@/types/hermes'
-import type { AvatarKind, AvatarState, AvatarWrite } from './types'
+import type { AvatarDisplay, AvatarKind, AvatarState, AvatarWrite } from './types'
 
 export type { AvatarKind, AvatarState, AvatarWrite } from './types'
 
@@ -73,6 +75,12 @@ export function officeDb(): DatabaseSync {
   if (!cols.has('anchored')) {
     d.exec(`ALTER TABLE avatar_state ADD COLUMN anchored INTEGER NOT NULL DEFAULT 0`)
   }
+  for (const [column, definition] of Object.entries({
+    display_name: 'TEXT', division_override: 'TEXT', role_label: 'TEXT',
+    use_hermes_division: 'INTEGER NOT NULL DEFAULT 1',
+  })) {
+    if (!cols.has(column)) d.exec(`ALTER TABLE avatar_state ADD COLUMN ${column} ${definition}`)
+  }
   db = d
   return d
 }
@@ -92,7 +100,7 @@ const now = () => new Date().toISOString()
 
 /* ------------------------------------------------------------------ meta -- */
 
-export const DEFAULT_OFFICE_NAME = 'Hermes Office'
+export const DEFAULT_OFFICE_NAME = 'Văn phòng Hermes'
 
 /** The office name shown (and editable) in the lobby. */
 export function getOfficeName(): string {
@@ -116,6 +124,10 @@ export function setOfficeName(value: string): string {
 /* ----------------------------------------------------------------- avatars -- */
 
 type AvatarRow = {
+  display_name: string | null
+  division_override: AgentDivision | null
+  role_label: string | null
+  use_hermes_division: number
   avatar_id: string
   name: string
   division: string
@@ -131,6 +143,10 @@ type AvatarRow = {
 }
 
 const toAvatar = (r: AvatarRow): AvatarState => ({
+  displayName: r.display_name ?? undefined,
+  divisionOverride: r.division_override ?? undefined,
+  roleLabel: r.role_label ?? undefined,
+  useHermesDivision: r.use_hermes_division !== 0,
   avatarId: r.avatar_id,
   name: r.name,
   division: r.division as AgentDivision,
@@ -166,6 +182,10 @@ export function deleteAvatar(avatarId: string): boolean {
 }
 
 /**
+ * Batch upsert. Settings are inserted for new rows only. Existing settings are
+ * exclusively owned by setAvatarDisplay/resetAvatarDisplay, so stale position
+ * flushes (including ones queued before a reset) cannot overwrite them.
+ *
  * Batch upsert. The scene calls this every few seconds for every avatar, so it
  * runs inside ONE transaction — a per-avatar round trip was measurably wasteful
  * and left the file open for longer than it needed to be.
@@ -175,8 +195,8 @@ export function saveAvatars(list: AvatarWrite[]): number {
   const d = officeDb()
   const stmt = d.prepare(
     `INSERT INTO avatar_state
-       (avatar_id, name, division, kind, x, z, level, activity, facing, spawned, anchored, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       (avatar_id, name, division, kind, x, z, level, activity, facing, spawned, anchored, updated_at, display_name, division_override, role_label, use_hermes_division)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(avatar_id) DO UPDATE SET
        name = excluded.name, division = excluded.division, kind = excluded.kind,
        x = excluded.x, z = excluded.z, level = excluded.level,
@@ -192,6 +212,7 @@ export function saveAvatars(list: AvatarWrite[]): number {
         a.avatarId, a.name, a.division, a.kind,
         a.x, a.z, a.level, a.activity, a.facing,
         a.spawned ? 1 : 0, a.anchored ? 1 : 0, ts,
+        a.displayName ?? null, a.divisionOverride ?? null, a.roleLabel ?? null, a.useHermesDivision === false ? 0 : 1,
       )
     }
     d.exec('COMMIT')
@@ -222,7 +243,7 @@ export function claimAvatar(
   const canonical = `agent:${clean}`
   const d = officeDb()
   const slot = d.prepare(`SELECT * FROM avatar_state WHERE avatar_id = ?`).get(avatarId) as AvatarRow | undefined
-  if (!slot) throw new Error(`slot \"${avatarId}\" tidak ada di kantor`)
+  if (!slot) throw new Error(`Vị trí \"${avatarId}\" không có trong văn phòng`)
   const existing = d.prepare(`SELECT avatar_id FROM avatar_state WHERE avatar_id = ?`).get(canonical) as
     | { avatar_id: string }
     | undefined
@@ -285,4 +306,51 @@ export function seedAvatars(specs: DummySpec[]): number {
       anchored: !!s.anchored,
     })),
   )
+}
+
+/** Shared validation for the dedicated settings API and direct callers. */
+export function validateAvatarDisplay(raw: unknown): AvatarDisplay {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('Invalid display settings')
+  const a = raw as Record<string, unknown>
+  const text = (key: string, limit: number) => {
+    const value = a[key]
+    if (value == null) return undefined
+    if (typeof value !== 'string' || value.length > limit) throw new Error(`Invalid ${key}`)
+    return value.trim() || undefined
+  }
+  if (a.divisionOverride != null && !['exec', 'tech', 'growth', 'content'].includes(a.divisionOverride as string)) {
+    throw new Error('Invalid divisionOverride')
+  }
+  if (a.useHermesDivision !== undefined && typeof a.useHermesDivision !== 'boolean') throw new Error('Invalid useHermesDivision')
+  return {
+    displayName: text('displayName', 80), roleLabel: text('roleLabel', 80),
+    divisionOverride: a.divisionOverride as AgentDivision | undefined ?? undefined,
+    useHermesDivision: a.useHermesDivision === undefined ? true : a.useHermesDivision as boolean,
+  }
+}
+
+export function setAvatarDisplay(avatarId: string, raw: unknown, seedName?: string): AvatarState | null {
+  const settings = validateAvatarDisplay(raw)
+  const d = officeDb()
+  // Only a server-verified canonical roster identity may create a settings row.
+  // No client position/kind/spawn/identity fields are accepted as a seed.
+  if (seedName !== undefined) {
+    if (!isSafeProfileName(seedName, { allowDefault: true }) || avatarId !== `agent:${seedName}`) {
+      throw new Error('Invalid avatar identity')
+    }
+    d.prepare(`INSERT OR IGNORE INTO avatar_state
+      (avatar_id, name, division, kind, x, z, level, activity, facing, spawned, anchored, updated_at)
+      VALUES (?, ?, 'exec', 'agent', ?, ?, 0, 'idle', ?, 0, 0, ?)`).run(avatarId, seedName, DOOR.x, DOOR.z - 1.2, Math.PI, now())
+  }
+  d.prepare(`UPDATE avatar_state SET display_name = ?, division_override = ?, role_label = ?,
+    use_hermes_division = ?, updated_at = ? WHERE avatar_id = ?`).run(
+    settings.displayName ?? null, settings.divisionOverride ?? null, settings.roleLabel ?? null,
+    settings.useHermesDivision ? 1 : 0, now(), avatarId,
+  )
+  const row = d.prepare('SELECT * FROM avatar_state WHERE avatar_id = ?').get(avatarId) as AvatarRow | undefined
+  return row ? toAvatar(row) : null
+}
+
+export function resetAvatarDisplay(avatarId: string, seedName?: string): AvatarState | null {
+  return setAvatarDisplay(avatarId, {}, seedName)
 }

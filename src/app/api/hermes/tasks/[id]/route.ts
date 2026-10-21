@@ -1,19 +1,31 @@
 import { NextRequest, NextResponse } from 'next/server'
 import {
   commentOnTask,
-  dispatchTask,
   getTask,
   listRuns,
-  listTasks,
   promoteTask,
   releaseWorker,
   setTaskModel,
   taskLog,
   unblockTask,
 } from '@/lib/hermes/kanban'
-import { assertLocalWriteRequest } from '@/lib/local-guard'
+import { assertApiRequest } from '@/lib/api-policy'
 
 export const dynamic = 'force-dynamic'
+
+/**
+ * HVO-05: "run selected card" is DISABLED.
+ *
+ * The old implementation called one board-wide `kanban dispatch --max 1` and
+ * then checked whether the selected id happened to be the card it spawned. It
+ * could run an unrelated ready card and spend tokens/cost on work nobody chose.
+ * No exact-target native dispatch contract is supplied in this patch, so the
+ * ambiguous operation is refused instead of pretending.
+ */
+const RUN_SELECTED_CARD_DISABLED = true
+const RUN_SELECTED_CARD_DISABLED_REASON =
+  'Nút "chạy thẻ này" ĐÃ TẮT: Hermes điều phối trên toàn bảng và có thể chạy thẻ khác. ' +
+  'Chưa xác minh được khả năng nhắm đúng thẻ. Hãy chạy từ CLI/bảng với đích do bạn tự chọn.'
 
 /**
  * One task: its run history and log tail, or an intervention.
@@ -23,7 +35,9 @@ export const dynamic = 'force-dynamic'
  * 200 with an empty payload — a misspelled or deleted task looked like a real task
  * that simply had no runs. A 404 is the honest answer.
  */
-export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
+export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
+  const denied = assertApiRequest(req, 'read')
+  if (denied) return denied
   const { id } = await ctx.params
   try {
     const task = await getTask(id)
@@ -49,11 +63,29 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string
  * outlives this request) and `promote` returns a blocked task to `ready`.
  */
 export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
-  const denied = assertLocalWriteRequest(req)
-  if (denied) return denied
+  // The disabled `run` action is answered clearly in every mode; other actions
+  // still require management-write.
+  const ingress = assertApiRequest(req, 'office-write')
+  if (ingress) return ingress
   const { id } = await ctx.params
   const body = await req.json().catch(() => ({}))
   const action = String(body?.action || '')
+  if (action === 'run') {
+    return NextResponse.json(
+      {
+        success: false,
+        disabled: RUN_SELECTED_CARD_DISABLED,
+        error: {
+          code: 'run_disabled',
+          message: RUN_SELECTED_CARD_DISABLED_REASON,
+          status: 501,
+        },
+      },
+      { status: 501 },
+    )
+  }
+  const denied = assertApiRequest(req, 'management-write')
+  if (denied) return denied
   try {
     // Same guard as GET: acting on a task that does not exist must say so rather
     // than report a downstream CLI error as a server fault.
@@ -64,7 +96,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
       const message = String(body?.message || '').trim()
       if (!message) {
         return NextResponse.json(
-          { error: { code: 'invalid_request', message: 'message is required', status: 400 } },
+          { error: { code: 'invalid_request', message: 'Bắt buộc nhập message', status: 400 } },
           { status: 400 },
         )
       }
@@ -81,55 +113,12 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
         return NextResponse.json(
           {
             error: notRunning
-              ? { code: 'not_running', message: 'Tugas ini tidak sedang berjalan.', status: 409 }
+              ? { code: 'not_running', message: 'Công việc này hiện không chạy.', status: 409 }
               : { code: 'action_failed', message: msg, status: 502 },
           },
           { status: notRunning ? 409 : 502 },
         )
       }
-    }
-    if (action === 'run') {
-      // One button that does the right thing: a parked task is lifted first (the
-      // dispatcher ignores blocked/scheduled rows entirely), then one dispatch
-      // pass runs. Reported honestly when the board still refuses to move it —
-      // e.g. a `todo` task whose parent dependencies are not done yet.
-      const parked = task.status === 'blocked' || task.status === 'scheduled'
-      if (parked) await unblockTask(id, 'dijalankan dari kantor')
-
-      const { spawned } = await dispatchTask()
-      const mine = spawned.includes(id)
-      if (mine) {
-        return NextResponse.json({
-          success: true,
-          spawned,
-          mine,
-          note: 'Worker dijalankan — pantau lewat Intip layar.',
-        })
-      }
-      const after = await getTask(id)
-      // Name the prerequisites. "menunggu prasyarat" without the ids leaves the
-      // reader with nothing to open, which is exactly the question it raises.
-      const waiting = after?.parents ?? []
-      // One board read, not one `show` per parent: the board already carries every
-      // status, and six CLI spawns to answer a status question is the kind of thing
-      // that turns a 3 s button into a 20 s one.
-      const board = new Map((await listTasks()).map((row) => [row.id, row.status]))
-      const open = waiting.filter((pid) => !['done', 'archived'].includes(board.get(pid) ?? ''))
-      const list = open.length ? open : waiting
-      return NextResponse.json({
-        success: true,
-        spawned,
-        mine,
-        parents: after?.parents ?? [],
-        note:
-          after?.status === 'todo' && list.length
-            ? `Tugas ini diparkir menunggu ${list.length} subtugas selesai dulu: ${list.join(', ')}.`
-            : after?.status === 'todo'
-              ? 'Tugas masih menunggu subtugas prasyaratnya selesai.'
-              : spawned.length
-                ? 'Dispatcher menjalankan tugas lain lebih dulu; coba lagi.'
-                : 'Belum ada yang bisa dijalankan sekarang.',
-      })
     }
     if (action === 'promote') {
       const reason = String(body?.message || '').trim() || 'dijalankan dari kantor'
@@ -152,7 +141,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
       {
         error: {
           code: 'invalid_request',
-          message: "action must be 'steer', 'cancel', 'run', 'promote' or 'set-model'",
+          message: "action phải là 'steer', 'cancel', 'promote' hoặc 'set-model' ('run' đã bị tắt)",
           status: 400,
         },
       },
@@ -168,7 +157,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
 
 function notFound(id: string) {
   return NextResponse.json(
-    { error: { code: 'not_found', message: `tugas "${id}" tidak ada di board`, status: 404 } },
+    { error: { code: 'not_found', message: `Công việc "${id}" không có trên bảng`, status: 404 } },
     { status: 404 },
   )
 }

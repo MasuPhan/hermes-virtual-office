@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import {
   claimAvatar,
+  setAvatarDisplay,
+  resetAvatarDisplay,
+  validateAvatarDisplay,
   getOfficeName,
   listAvatars,
   saveAvatars,
@@ -8,8 +11,10 @@ import {
   setOfficeName,
   type AvatarWrite,
 } from '@/lib/office/db'
+import { listProfiles, listAssignees } from '@/lib/hermes/kanban'
+import { isSafeProfileName } from '@/lib/hermes/profile-name'
 import { dummyRoster } from '@/lib/office/dummy-roster'
-import { assertLocalWriteRequest } from '@/lib/local-guard'
+import { assertApiRequest } from '@/lib/api-policy'
 import type { AgentDivision } from '@/types/hermes'
 
 export const dynamic = 'force-dynamic'
@@ -22,7 +27,9 @@ export const dynamic = 'force-dynamic'
  * to the office itself. Keeping them apart means a broken Hermes install still
  * lets the room render, and the office's own tables never risk the CLI's schema.
  */
-export async function GET() {
+export async function GET(req: NextRequest) {
+  const denied = assertApiRequest(req, 'read')
+  if (denied) return denied
   try {
     // First run: populate the dummy roster so the building is not empty. Idempotent
     // — it only fires when the table has no rows at all.
@@ -40,6 +47,10 @@ export async function GET() {
 }
 
 type Body = {
+  displayName?: unknown
+  divisionOverride?: unknown
+  roleLabel?: unknown
+  useHermesDivision?: unknown
   action?: string
   name?: string
   avatarId?: string
@@ -59,6 +70,7 @@ function cleanAvatar(raw: unknown): AvatarWrite | null {
   if (!a?.avatarId || !a?.name) return null
   const division = DIVISIONS.includes(a.division as AgentDivision) ? (a.division as AgentDivision) : 'tech'
   return {
+    ...validateAvatarDisplay(a),
     avatarId: String(a.avatarId),
     name: String(a.name),
     division,
@@ -77,16 +89,52 @@ function cleanAvatar(raw: unknown): AvatarWrite | null {
 export async function POST(req: NextRequest) {
   // Same-origin write guard, exactly like the other mutating routes: this server
   // is exposed on a public port, and these actions write to disk.
-  const denied = assertLocalWriteRequest(req)
+  const denied = assertApiRequest(req, 'office-write')
   if (denied) return denied
 
-  const body = (await req.json().catch(() => ({}))) as Body
+  const raw: unknown = await req.json().catch(() => null)
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    return NextResponse.json({ error: { code: 'invalid_request', message: 'Invalid body', status: 400 } }, { status: 400 })
+  }
+  const body = raw as Body
   try {
     switch (body.action) {
+      case 'setAvatarDisplay':
+      case 'resetAvatarDisplay': {
+        try {
+          if (typeof body.avatarId !== 'string' || !body.avatarId.trim()) throw new Error('Invalid avatarId')
+          validateAvatarDisplay(body)
+        } catch (err) {
+          return NextResponse.json({ error: { code: 'invalid_request', message: (err as Error).message, status: 400 } }, { status: 400 })
+        }
+        let seedName: string | undefined
+        if (!listAvatars().some((a) => a.avatarId === body.avatarId)) {
+          const name = body.avatarId!.startsWith('agent:') ? body.avatarId!.slice(6) : ''
+          if (!isSafeProfileName(name, { allowDefault: true }) || body.avatarId !== `agent:${name}`) {
+            return NextResponse.json({ error: { code: 'invalid_request', message: 'Invalid avatar identity', status: 400 } }, { status: 400 })
+          }
+          // Read roster only: never create/spawn a Hermes profile or alter membership.
+          const profiles = await listProfiles()
+          if (!profiles.includes(name) && !(await listAssignees()).some((a) => a.name === name)) {
+            return NextResponse.json({ error: { code: 'not_found', message: 'Agent not found', status: 404 } }, { status: 404 })
+          }
+          seedName = name
+        }
+        const avatar = body.action === 'resetAvatarDisplay'
+          ? resetAvatarDisplay(body.avatarId!, seedName) : setAvatarDisplay(body.avatarId!, body, seedName)
+        if (!avatar) return NextResponse.json({ error: { code: 'not_found', message: 'Avatar not found', status: 404 } }, { status: 404 })
+        return NextResponse.json({ avatar })
+      }
       case 'setName': {
         return NextResponse.json({ name: setOfficeName(String(body.name ?? '')) })
       }
       case 'saveAvatars': {
+        try {
+          if (!Array.isArray(body.list)) throw new Error('Invalid list')
+          for (const row of body.list) validateAvatarDisplay(row)
+        } catch (err) {
+          return NextResponse.json({ error: { code: 'invalid_request', message: (err as Error).message, status: 400 } }, { status: 400 })
+        }
         const list = (Array.isArray(body.list) ? body.list : [])
           .map(cleanAvatar)
           .filter((a): a is AvatarWrite => a !== null)
@@ -100,7 +148,7 @@ export async function POST(req: NextRequest) {
         const claimName = String(body.name ?? '').trim().toLowerCase()
         if (!avatarId || !claimName) {
           return NextResponse.json(
-            { error: { code: 'invalid_request', message: 'claimAvatar butuh avatarId + name', status: 400 } },
+            { error: { code: 'invalid_request', message: 'claimAvatar cần avatarId + name', status: 400 } },
             { status: 400 },
           )
         }
@@ -116,7 +164,7 @@ export async function POST(req: NextRequest) {
       }
       default:
         return NextResponse.json(
-          { error: { code: 'invalid_request', message: `action tidak dikenal: ${body.action}`, status: 400 } },
+          { error: { code: 'invalid_request', message: `action không xác định: ${body.action}`, status: 400 } },
           { status: 400 },
         )
     }

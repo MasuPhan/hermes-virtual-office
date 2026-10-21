@@ -101,14 +101,14 @@ export const ROOMS: Room[] = [
   /* ------------------------------------------------------------ level 0 -- */
   {
     id: 'lobby',
-    label: 'LOBI',
+    label: 'SẢNH',
     level: 0,
     ...BARS.lobby,
     door: { x: DOOR.x, z: HALF_D, hw: 2.2, hd: 0.6 },
   },
   {
     id: 'courtyard',
-    label: 'COURTYARD',
+    label: 'SÂN TRONG',
     level: 0,
     ...BARS.courtyard,
     outdoor: true,
@@ -116,13 +116,13 @@ export const ROOMS: Room[] = [
   /* the north bar's ground floor is an open covered terrace — the circulation hub */
   {
     id: 'terrace',
-    label: 'TERAS',
+    label: 'HIÊN',
     level: 0,
     ...BARS.north,
   },
   {
     id: 'dev',
-    label: 'DEVELOPER & INFRASTRUCTURE',
+    label: 'PHÁT TRIỂN & HẠ TẦNG',
     level: 0,
     x1: WORK_X1,
     x2: WORK_X2,
@@ -132,7 +132,7 @@ export const ROOMS: Room[] = [
   },
   {
     id: 'mkt',
-    label: 'MARKETING & SEO',
+    label: 'TIẾP THỊ & SEO',
     level: 0,
     x1: WORK_X1,
     x2: WORK_X2,
@@ -142,7 +142,7 @@ export const ROOMS: Room[] = [
   },
   {
     id: 'content',
-    label: 'CONTENT CREATOR',
+    label: 'SÁNG TẠO NỘI DUNG',
     level: 0,
     x1: WORK_X1,
     x2: WORK_X2,
@@ -152,7 +152,7 @@ export const ROOMS: Room[] = [
   },
   {
     id: 'leisure',
-    label: 'RUANG SANTAI',
+    label: 'PHÒNG NGHỈ',
     level: 0,
     x1: 14 + WALL_T / 2,
     x2: ROOM_W,
@@ -162,7 +162,7 @@ export const ROOMS: Room[] = [
   },
   {
     id: 'pantry',
-    label: 'PANTRY / DAPUR',
+    label: 'KHU BẾP',
     level: 0,
     x1: 14 + WALL_T / 2,
     x2: ROOM_W,
@@ -176,7 +176,7 @@ export const ROOMS: Room[] = [
   // (z -11.5..-9.3) serves all six rooms; the stair lands at its west end.
   {
     id: 'corridor1',
-    label: 'KORIDOR EKSEKUTIF',
+    label: 'HÀNH LANG ĐIỀU HÀNH',
     level: 1,
     x1: -ROOM_W,
     x2: ROOM_W,
@@ -185,7 +185,7 @@ export const ROOMS: Room[] = [
   },
   {
     id: 'ceo',
-    label: 'RUANG CEO',
+    label: 'PHÒNG CEO',
     level: 1,
     x1: -ROOM_W,
     x2: -19.3,
@@ -248,7 +248,7 @@ export const ROOMS: Room[] = [
 export const roomById = (id: string): Room | undefined => ROOMS.find((r) => r.id === id)
 const room = (id: string): Room => {
   const r = roomById(id)
-  if (!r) throw new Error(`unknown room: ${id}`)
+  if (!r) throw new Error(`Phòng không xác định: ${id}`)
   return r
 }
 export const roomCentre = (id: string) => {
@@ -909,7 +909,7 @@ export const KANBAN_BOARD = {
   w: 6.0,
   h: 2.4,
 }
-export const BOARD_COLUMNS = ['TODO', 'JALAN', 'REVIEW', 'SELESAI'] as const
+export const BOARD_COLUMNS = ['CẦN LÀM', 'ĐANG CHẠY', 'ĐÁNH GIÁ', 'HOÀN TẤT'] as const
 
 /** Reception counter in the lobby, facing the entrance. Kept OFF the centre axis
  * (which must stay clear from the door into the courtyard) — a visitor walks in,
@@ -2212,7 +2212,7 @@ export const ROOM_PLAQUES: {
   const at = PLAQUE_AT[id]
   return {
     id,
-    text: MEETING_SET.has(id) ? `R. MEETING ${r.label}` : r.label,
+    text: MEETING_SET.has(id) ? `PHÒNG HỌP ${r.label}` : r.label,
     x: at.x,
     y: r.level * LEVEL_H + PLAQUE_Y,
     z: at.z,

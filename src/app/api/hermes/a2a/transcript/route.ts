@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { readA2aTranscript } from '@/lib/hermes/a2a-transcript-server'
 import { listProfiles } from '@/lib/hermes/kanban'
+import { assertApiRequest } from '@/lib/api-policy'
 
 export const dynamic = 'force-dynamic'
 
@@ -17,7 +18,9 @@ export const dynamic = 'force-dynamic'
 let memo: { at: number; body: Awaited<ReturnType<typeof readA2aTranscript>> } | null = null
 const MEMO_MS = 20_000
 
-export async function GET() {
+export async function GET(req: Request) {
+  const denied = assertApiRequest(req, 'read')
+  if (denied) return denied
   try {
     const now = Date.now()
     if (memo && now - memo.at < MEMO_MS) return NextResponse.json(memo.body)

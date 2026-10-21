@@ -1,91 +1,173 @@
 import { NextResponse } from 'next/server'
 
 /**
- * Write guard for the office's mutating endpoints.
+ * Host/Origin primitives for the office's central API ingress policy.
  *
- * WHY THIS FILE EXISTS: every action that changes something — kill, spawn, hide,
- * create a task, send a chat, start a meeting, rename the office — goes through
- * here. The office is normally opened at its PUBLIC address, but this guard once
- * allowed only loopback names, so every write from a real browser was answered
- * 403. Reads worked, which is exactly why the app looked alive but felt dead:
- * nothing you clicked did anything.
+ * Every API method — including GET — must name a trusted Host. Mutations must
+ * additionally carry an Origin that EXACTLY matches the trusted origin:
+ * same scheme, host and (where configured) port. This stops:
  *
- * TWO checks, and both are needed:
+ *   1. DNS rebinding / foreign Host requests reading office state (Host gate).
+ *   2. Cross-site form/fetch writes (exact Origin gate).
  *
- *   1. SAME-ORIGIN. The `Origin` header must name the very host being requested.
- *      This is the CSRF defence: a page on evil.example sends
- *      `Origin: http://evil.example`, which can never equal our `Host`.
+ * It is NOT authentication. There is no login: any local process that can reach
+ * the port can supply trusted headers. The app is for local single-user use and
+ * must not be exposed beyond loopback without a real auth layer.
  *
- *   2. A TRUSTED HOST. That host must be loopback or explicitly listed in
- *      `ALLOWED_ORIGINS`. This is the DNS-rebinding defence: an attacker who
- *      points evil.example at our IP gets `Host` and `Origin` to agree, but
- *      evil.example is not on the list.
+ * `ALLOWED_ORIGINS` entries (comma-separated):
+ *   https://office.example.com:8443   exact scheme + host + port
+ *   office.example.com:3300           exact host + port, plain http
+ *   office.example.com                exact host, plain http, any port (legacy)
  *
- * WHAT THIS DOES **NOT** DO: it does not authenticate anyone. A person who opens
- * the office URL in a browser IS same-origin, so they can write. On a public port
- * that means anyone who knows the URL can act. This guard stops cross-site
- * attacks, not visitors. Real protection needs a token — see docs/API-SPEC.md.
+ * `X-Forwarded-*` headers are never consulted; a trusted reverse proxy must be
+ * configured to preserve the real Host/Origin, or authentication must be added.
  */
 
-/** Loopback names, always trusted. */
-const LOOPBACK = new Set(['localhost', '127.0.0.1', '[::1]'])
+const LOOPBACK = new Set(['localhost', '127.0.0.1', '[::1]', '::1'])
 
-/**
- * Extra hosts allowed to write, from `ALLOWED_ORIGINS` in `.env.local`.
- *
- * Comma-separated `host[:port]` entries; a scheme prefix is tolerated so an
- * operator can paste a full origin. Example:
- *
- *   ALLOWED_ORIGINS=203.0.113.10:3300,office.example.com
- */
-function configuredHosts(): string[] {
-  return (process.env.ALLOWED_ORIGINS || '')
-    .split(',')
-    .map((s) => s.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/+$/, ''))
-    .filter(Boolean)
+type ParsedOrigin = { protocol: 'http:' | 'https:'; hostname: string; port: string; anyPort: boolean }
+
+function configuredRaw(allowedRaw?: string): string {
+  return allowedRaw ?? process.env.ALLOWED_ORIGINS ?? ''
 }
 
-/** Strip a trailing `:port`, leaving the bare host (handles `[::1]:3000`). */
-function bareHost(host: string): string {
-  return host.replace(/:\d+$/, '')
+function effectivePort(u: URL): string {
+  if (u.port) return u.port
+  return u.protocol === 'https:' ? '443' : '80'
 }
 
-function trustedHost(host: string): boolean {
-  if (LOOPBACK.has(bareHost(host))) return true
-  const bare = bareHost(host)
-  return configuredHosts().some((entry) => entry === host || entry === bare)
+function normalizeHostname(h: string): string {
+  return h.trim().toLowerCase()
 }
 
-export function localOriginAllowed(hostHeader: string | null, originHeader: string | null): boolean {
-  if (!hostHeader || !originHeader) return false
-
+function parseConfiguredEntry(entry: string): ParsedOrigin | null {
+  const raw = entry.trim().toLowerCase()
+  if (!raw) return null
+  const hasScheme = /^[a-z][a-z0-9+.-]*:\/\//.test(raw)
+  const candidate = hasScheme ? raw : `http://${raw}`
+  let u: URL
   try {
-    const host = new URL(`http://${hostHeader}`)
-    const origin = new URL(originHeader)
-    // 1. same-origin: the Origin names the host being requested
-    if (origin.host !== host.host) return false
-    // the office is served over plain http; an https origin is a different origin
-    if (origin.protocol !== 'http:') return false
-    // 2. and that host is one we trust
-    return trustedHost(host.host)
+    u = new URL(candidate)
   } catch {
-    return false
+    return null
+  }
+  if (u.protocol !== 'http:' && u.protocol !== 'https:') return null
+  if (u.username || u.password) return null
+  if (u.pathname !== '/' || u.search || u.hash) return null
+  const anyPort = !hasScheme && !/:\d+$/.test(raw)
+  return {
+    protocol: u.protocol,
+    hostname: normalizeHostname(u.hostname),
+    port: effectivePort(u),
+    anyPort,
   }
 }
 
+function configuredOrigins(allowedRaw?: string): ParsedOrigin[] {
+  return configuredRaw(allowedRaw)
+    .split(',')
+    .map(parseConfiguredEntry)
+    .filter((x): x is ParsedOrigin => x !== null)
+}
+
+function parseHostHeader(hostHeader: string | null): URL | null {
+  if (!hostHeader || /[\r\n]/.test(hostHeader)) return null
+  try {
+    const u = new URL(`http://${hostHeader}`)
+    if (u.username || u.password) return null
+    if (u.pathname !== '/' || u.search || u.hash) return null
+    return u
+  } catch {
+    return null
+  }
+}
+
+function isLoopbackHostname(hostname: string): boolean {
+  return LOOPBACK.has(normalizeHostname(hostname))
+}
+
+function hostMatchesEntry(host: URL, entry: ParsedOrigin): boolean {
+  if (normalizeHostname(host.hostname) !== entry.hostname) return false
+  if (entry.anyPort) return true
+  // The Host header carries no scheme. An omitted port is compatible with a
+  // configured default port (80 for http, 443 for https); a non-default port
+  // must be written explicitly in both the Host and the configured origin.
+  if (!host.port) return entry.port === '80' || entry.port === '443'
+  return effectivePort(host) === entry.port
+}
+
+/** Is this raw `Host` header one we are willing to answer at all? */
+export function isTrustedHost(hostHeader: string | null, allowedRaw?: string): boolean {
+  const host = parseHostHeader(hostHeader)
+  if (!host) return false
+  if (isLoopbackHostname(host.hostname)) return true
+  return configuredOrigins(allowedRaw).some((entry) => hostMatchesEntry(host, entry))
+}
+
+/**
+ * Does this Origin exactly match the request Host and a trusted configured
+ * origin? Loopback is trusted for both http and https; configured origins must
+ * match the configured scheme/host/port exactly.
+ */
+export function isTrustedOrigin(
+  hostHeader: string | null,
+  originHeader: string | null,
+  allowedRaw?: string,
+): boolean {
+  const host = parseHostHeader(hostHeader)
+  if (!host) return false
+  if (!originHeader || /[\r\n]/.test(originHeader)) return false
+  let origin: URL
+  try {
+    origin = new URL(originHeader)
+  } catch {
+    return false
+  }
+  if (origin.protocol !== 'http:' && origin.protocol !== 'https:') return false
+  // Same-origin: the Origin must name the request Host. The Host header has no
+  // scheme, so an omitted Host port is compatible with the Origin's default port.
+  if (normalizeHostname(origin.hostname) !== normalizeHostname(host.hostname)) return false
+  if (host.port && effectivePort(origin) !== host.port) return false
+  if (isLoopbackHostname(host.hostname)) {
+    return isLoopbackHostname(origin.hostname)
+  }
+  return configuredOrigins(allowedRaw).some(
+    (entry) =>
+      origin.protocol === entry.protocol &&
+      normalizeHostname(origin.hostname) === entry.hostname &&
+      hostMatchesEntry(host, entry) &&
+      (entry.anyPort ? origin.host === host.host : effectivePort(origin) === entry.port),
+  )
+}
+
+/**
+ * Backwards-compatible predicate used by the self-tests and doctor mirror.
+ * Both Host and Origin are required, and the Origin must be exact.
+ */
+export function localOriginAllowed(
+  hostHeader: string | null,
+  originHeader: string | null,
+  allowedRaw?: string,
+): boolean {
+  return isTrustedHost(hostHeader, allowedRaw) && isTrustedOrigin(hostHeader, originHeader, allowedRaw)
+}
+
+/**
+ * Legacy write-only guard. New routes use `assertApiRequest` from
+ * `@/lib/api-policy` so safe-mode gating is central. This stays for any external
+ * caller that only needs the ingress checks.
+ */
 export function assertLocalWriteRequest(req: Request): NextResponse | null {
   const host = req.headers.get('host')
   const origin = req.headers.get('origin')
   if (localOriginAllowed(host, origin)) return null
-  // The message names the fix, because a silent 403 here is indistinguishable
-  // from a broken button — which is precisely how this bug hid for so long.
   return NextResponse.json(
     {
       error: {
-        code: 'forbidden_origin',
-        message:
-          `origin "${origin ?? '(tidak ada)'}" tidak diizinkan menulis. ` +
-          `Tambahkan "${origin ?? host ?? 'host ini'}" ke ALLOWED_ORIGINS di .env.local, lalu restart.`,
+        code: isTrustedHost(host) ? 'forbidden_origin' : 'forbidden_host',
+        message: isTrustedHost(host)
+          ? `Origin "${origin ?? '(không có)'}" không được phép ghi. Origin phải trùng với Host và có trong ALLOWED_ORIGINS (khớp chính xác giao thức/host/cổng), sau đó khởi động lại.`
+          : `Host "${host ?? '(không có)'}" không đáng tin cậy. Chỉ chấp nhận loopback hoặc host trong ALLOWED_ORIGINS.`,
         status: 403,
       },
     },

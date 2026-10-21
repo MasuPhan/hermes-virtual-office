@@ -13,7 +13,7 @@
  * yang menelan error jadi sukses. Idempoten: dua kali jalan tak merusak apa pun.
  */
 
-import { readdir, rm } from 'node:fs/promises'
+import { readdir } from 'node:fs/promises'
 import path from 'node:path'
 import {
   classifyProviderScope,
@@ -31,7 +31,7 @@ import {
   profileModel,
   profileToolsets,
 } from './kanban'
-import { listServedAgents, removeServedAgent } from './a2a-served'
+import { A2A_CONFIG_WRITE_DISABLED_REASON, listServedAgents, removeServedAgent } from './a2a-served'
 import { deleteAvatar, listAvatars } from '../office/db'
 
 export type RepairKind =
@@ -163,24 +163,25 @@ export async function previewRepairs(): Promise<RepairPreview> {
 
   const profiles = await listProfiles().catch(() => null)
   if (profiles === null) {
-    return { planned, unfixable: [{ target: '(daftar profil)', why: 'tidak bisa dipastikan — daftar profil gagal dibaca' }] }
+    return { planned, unfixable: [{ target: '(danh sách hồ sơ)', why: 'Không thể xác định — không đọc được danh sách hồ sơ' }] }
   }
   const have = new Set(profiles.map((p) => p.trim().toLowerCase()))
 
-  // 1. Entri served basi (profilnya sudah tiada).
+  // 1. Entri served basi (profilnya sudah tiada). HVO-01: writer config A2A
+  // dimatikan, jadi ini DILAPORKAN manual — jangan menjanjikan perbaikan yang
+  // tidak akan dijalankan.
   try {
     const served = await listServedAgents()
     for (const s of served) {
       if (!have.has(s.profile.trim().toLowerCase())) {
-        planned.push({
-          kind: 'staleServed',
+        unfixable.push({
           target: s.profile,
-          what: `cabut entri served BASI "${s.profile}" (profil hilang)`,
+          why: `Mục đăng ký phục vụ LỖI THỜI — ${A2A_CONFIG_WRITE_DISABLED_REASON}`,
         })
       }
     }
   } catch {
-    unfixable.push({ target: '(daftar served)', why: 'tak terbaca — entri basi tidak bisa dipastikan' })
+    unfixable.push({ target: '(danh sách đăng ký phục vụ)', why: 'Không đọc được — chưa thể xác định mục lỗi thời' })
   }
 
   // 2+3. Baris avatar mayat + ganda (DB kantor sendiri — selalu terbaca lokal).
@@ -194,7 +195,7 @@ export async function previewRepairs(): Promise<RepairPreview> {
         planned.push({
           kind: 'deadAvatar',
           target: r.avatarId,
-          what: `hapus baris avatar mayat "${r.avatarId}" (agent "${r.name}" tanpa profil)`,
+          what: `Xóa bản ghi nhân vật mồ côi "${r.avatarId}" (tác tử "${r.name}" không có hồ sơ)`,
         })
       }
     }
@@ -206,47 +207,58 @@ export async function previewRepairs(): Promise<RepairPreview> {
         planned.push({
           kind: 'dupAvatar',
           target: name,
-          what: `gabung ${live.length} baris "${name}" → sisakan "${kept}"`,
+          what: `Gộp ${live.length} bản ghi "${name}" → giữ lại "${kept}"`,
         })
       }
     }
   } catch (err) {
-    unfixable.push({ target: '(avatar kantor)', why: `tak terbaca — ${(err as Error).message.slice(0, 160)}` })
+    unfixable.push({ target: '(nhân vật văn phòng)', why: `Không đọc được — ${(err as Error).message.slice(0, 160)}` })
   }
 
-  // 4. Sisa direktori profiles/<nama>/ tanpa profil. Syarat KETAT (kriteria
-  // listProfiles = direktori berisi config.yaml): `.deleted` = tombstone resmi
-  // Hermes — JANGAN disentuh; direktori yang MASIH berisi config.yaml = profil
-  // (walau listProfiles gagal membacanya) — JANGAN disapu, laporkan unfixable.
+  // 4. HVO-12: automatic stray-directory cleanup is DISABLED ENTIRELY.
+  // A directory without config.yaml can still hold sessions/memory/identity
+  // files, and an access error is not proof of absence. Nothing here is ever
+  // deleted; every non-profile directory is reported for manual recovery.
   try {
     const dir = path.join(hermesHome(), 'profiles')
-    const entries = await readdir(dir, { withFileTypes: true }).catch(() => null)
+    const entries = await readdir(dir, { withFileTypes: true }).catch((err: NodeJS.ErrnoException) => {
+      if (err.code === 'ENOENT') return null
+      unfixable.push({
+        target: '(thư mục hồ sơ)',
+        why: `Không đọc được (${err.code || 'unknown'}) — chưa thể xác định trạng thái`,
+      })
+      return null
+    })
     if (entries) {
       for (const e of entries) {
         if (!e.isDirectory()) continue
         if (e.name === '.deleted') continue
         if (have.has(e.name.trim().toLowerCase())) continue
         const { access } = await import('node:fs/promises')
-        let hasConfig = false
         try {
           await access(path.join(dir, e.name, 'config.yaml'))
-          hasConfig = true
-        } catch {
-          hasConfig = false
+          unfixable.push({
+            target: e.name,
+            why: 'Thư mục vẫn có config.yaml — không phải phần sót lại, không tự dọn dẹp',
+          })
+        } catch (err) {
+          const code = (err as NodeJS.ErrnoException).code
+          if (code !== 'ENOENT') {
+            unfixable.push({
+              target: e.name,
+              why: `Không thể truy cập (${code || 'unknown'}) — chưa đủ căn cứ kết luận thư mục trống; cần khôi phục thủ công`,
+            })
+            continue
+          }
+          unfixable.push({
+            target: e.name,
+            why: 'Thư mục còn sót lại không có config.yaml — dọn dẹp tự động ĐÃ TẮT; hãy kiểm tra, sao lưu rồi khôi phục/xóa thủ công',
+          })
         }
-        if (hasConfig) {
-          unfixable.push({ target: e.name, why: 'direktori masih berisi config.yaml — bukan sisa, tak dibersihkan' })
-          continue
-        }
-        planned.push({
-          kind: 'strayProfileDir',
-          target: e.name,
-          what: `bersihkan sisa direktori profiles/${e.name}/ (tanpa profil, tanpa config.yaml)`,
-        })
       }
     }
   } catch (err) {
-    unfixable.push({ target: '(direktori profil)', why: `tak terbaca — ${(err as Error).message.slice(0, 160)}` })
+    unfixable.push({ target: '(thư mục hồ sơ)', why: `Không đọc được — ${(err as Error).message.slice(0, 160)}` })
   }
 
   // 5+6+7. Per profil: provider menggantung + toolset a2a hilang + peer hilang.
@@ -264,13 +276,15 @@ export async function previewRepairs(): Promise<RepairPreview> {
     if (c.model && c.model.provider) {
       const verdict = classifyProviderScope(c.model.provider, c.defs ?? null)
       if (verdict === 'dangling') {
-        planned.push({
-          kind: 'danglingProvider',
+        unfixable.push({
           target: c.p,
-          what: `salin definisi provider "${c.model.provider.trim()}" dari config global ke profil "${c.p}"`,
+          why:
+            `Nhà cung cấp "${c.model.provider.trim()}" chưa có định nghĩa — sao chép định nghĩa tự động ĐÃ TẮT ` +
+            `(config-get che api_key). Hãy tự định nghĩa nhà cung cấp bằng thông tin xác thực thật; ` +
+            `model/provider hiện có không bị thay đổi.`,
         })
       } else if (verdict === 'unknown') {
-        unfixable.push({ target: c.p, why: 'tidak bisa dipastikan — definisi provider tak terbaca' })
+        unfixable.push({ target: c.p, why: 'Không thể xác định — không đọc được định nghĩa nhà cung cấp' })
       }
     }
     if (c.tools !== null && !c.tools.some((t) => String(t).trim().toLowerCase() === 'a2a')) {
@@ -279,11 +293,11 @@ export async function previewRepairs(): Promise<RepairPreview> {
         target: c.p,
         what:
           c.tools.length === 0
-            ? `tambahkan toolset "a2a" ke profil "${c.p}" (kunci platform_toolsets tidak ada — bisa dipanggil, tak bisa memanggil)`
-            : `tambahkan toolset "a2a" ke platform_toolsets.cli profil "${c.p}" (bisa dipanggil, tak bisa memanggil)`,
+            ? `Thêm toolset "a2a" vào hồ sơ "${c.p}" (thiếu khóa platform_toolsets — nhận được cuộc gọi nhưng không gọi được)`
+            : `Thêm toolset "a2a" vào platform_toolsets.cli của hồ sơ "${c.p}" (nhận được cuộc gọi nhưng không gọi được)`,
       })
     } else if (c.tools === null) {
-      unfixable.push({ target: c.p, why: 'tidak bisa dipastikan — platform_toolsets gagal dibaca (bukan sekadar tak ada)' })
+      unfixable.push({ target: c.p, why: 'Không thể xác định — không đọc được platform_toolsets (không phải không tồn tại)' })
     }
   }
 
@@ -294,7 +308,7 @@ export async function previewRepairs(): Promise<RepairPreview> {
     const served = await listServedAgents()
     const peers = await listA2aPeers()
     if (peers === null) {
-      unfixable.push({ target: '(daftar peer a2a_agents)', why: 'tak terbaca — peer hilang tidak bisa dipastikan' })
+      unfixable.push({ target: '(danh sách peer a2a_agents)', why: 'Không đọc được — chưa thể xác định peer còn thiếu' })
     } else {
       const { samePeerUrl, listProfilePeers } = await import('./kanban')
       for (const s of served) {
@@ -305,7 +319,7 @@ export async function previewRepairs(): Promise<RepairPreview> {
           planned.push({
             kind: 'missingA2aPeer',
             target: s.profile,
-            what: `daftarkan peer "${key}" → ${want} (nama agent bisa diresolusi a2a_call)`,
+            what: `Đăng ký peer "${key}" → ${want} (phân giải được tên tác tử qua a2a_call)`,
           })
         }
       }
@@ -317,7 +331,7 @@ export async function previewRepairs(): Promise<RepairPreview> {
       )
       for (const pp of profPeers) {
         if (pp.mine === null) {
-          unfixable.push({ target: pp.s.profile, why: 'tidak bisa dipastikan — peer profil gagal dibaca (bukan sekadar tak ada)' })
+          unfixable.push({ target: pp.s.profile, why: 'Không thể xác định — không đọc được peer của hồ sơ (không phải không tồn tại)' })
           continue
         }
         for (const t of served) {
@@ -329,14 +343,14 @@ export async function previewRepairs(): Promise<RepairPreview> {
             planned.push({
               kind: 'missingA2aPeer',
               target: `${pp.s.profile}→${t.profile}`,
-              what: `tulis peer "${key}" → ${want} di profil "${pp.s.profile}" (gate tool a2a_call scope-profil)`,
+              what: `Ghi peer "${key}" → ${want} vào hồ sơ "${pp.s.profile}" (giới hạn công cụ a2a_call theo phạm vi hồ sơ)`,
             })
           }
         }
       }
     }
   } catch {
-    unfixable.push({ target: '(daftar peer a2a_agents)', why: 'tak terbaca — peer hilang tidak bisa dipastikan' })
+    unfixable.push({ target: '(danh sách peer a2a_agents)', why: 'Không đọc được — chưa thể xác định peer còn thiếu' })
   }
 
   return { planned, unfixable }
@@ -398,23 +412,13 @@ export async function runRepairs(): Promise<RepairResult> {
           break
         }
         case 'strayProfileDir': {
-          // Verifikasi ulang SEBELUM rm: direktori + tanpa config.yaml harus
-          // masih benar saat eksekusi (bukan saat pratinjau). `.deleted`
-          // dan yang berisi config.yaml = JANGAN sentuh (lewati diam-diam —
-          // keadaan berubah di tengah jalan, bukan kegagalan).
-          if (item.target === '.deleted') break
-          const dir = path.join(hermesHome(), 'profiles', item.target)
-          const { access } = await import('node:fs/promises')
-          try {
-            await access(path.join(dir, 'config.yaml'))
-            break // config.yaml muncul di tengah jalan = profil, jangan sapu
-          } catch {
-            // memang tanpa config.yaml — lanjut
-          }
-          const entries = await readdir(dir).catch(() => null)
-          if (entries === null) break // sudah hilang di tengah jalan
-          await rm(dir, { recursive: true, force: true })
-          res.dirsRemoved.push(item.target)
+          // HVO-12: never delete profile-shaped directories automatically.
+          // This case is retained only so an old queued preview cannot execute a
+          // recursive delete; it is a no-op and the target is reported.
+          res.unfixable.push({
+            target: item.target,
+            why: 'Dọn dẹp thư mục tự động ĐÃ TẮT — cần khôi phục thủ công',
+          })
           break
         }
         case 'danglingProvider': {

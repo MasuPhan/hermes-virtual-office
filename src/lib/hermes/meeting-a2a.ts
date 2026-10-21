@@ -63,9 +63,9 @@ export function missingServed(
  */
 export function formatReject(names: string[]): string {
   return (
-    `rapat A2A tidak dimulai — belum di-serve A2A: ${names.join(', ')}. ` +
-    `Nyalakan toggle A2A di form Agent untuk tiap nama itu, lalu restart gateway ` +
-    `(daftar served-agent dibaca sekali saat boot).`
+    `Không bắt đầu cuộc họp A2A — chưa đăng ký phục vụ A2A: ${names.join(', ')}. ` +
+    `Bật A2A trong biểu mẫu Tác tử cho từng tên đó, rồi khởi động lại gateway ` +
+    `(danh sách tác tử phục vụ chỉ được đọc một lần lúc khởi động).`
   )
 }
 
@@ -165,9 +165,9 @@ export function parseSendResult(json: unknown): A2aTurnOk {
       artifacts?: { parts?: unknown }[]
     }
   } | null
-  if (!doc || typeof doc !== 'object') throw new Error('balasan A2A bukan JSON object')
+  if (!doc || typeof doc !== 'object') throw new Error('Phản hồi A2A không phải đối tượng JSON')
   if (doc.error) {
-    throw new Error(`A2A error ${String(doc.error.code ?? '')}: ${String(doc.error.message ?? 'tak diketahui').slice(0, 200)}`)
+    throw new Error(`Lỗi A2A ${String(doc.error.code ?? '')}: ${String(doc.error.message ?? 'không xác định').slice(0, 200)}`)
   }
   const partsOf = (p: unknown): string[] => {
     if (!Array.isArray(p)) return []
@@ -186,7 +186,7 @@ export function parseSendResult(json: unknown): A2aTurnOk {
     ? []
     : (doc.result?.artifacts ?? []).flatMap((a) => partsOf(a?.parts))
   const text = stripTransportNoise([...primary, ...fallback].join('\n').trim()).slice(0, 4000)
-  if (!text) throw new Error('balasan A2A kosong / tak terbaca (bukan format message/send)')
+  if (!text) throw new Error('Phản hồi A2A trống / không đọc được (không đúng định dạng message/send)')
   const ctx = typeof doc.result?.contextId === 'string' ? doc.result.contextId : null
   return { text, ctx }
 }
@@ -217,12 +217,12 @@ export async function sendA2a(
     })
     if (!res.ok) {
       const body = await res.text().catch(() => '')
-      throw new Error(`HTTP ${res.status} dari /${slug}: ${body.slice(0, 200)}`)
+      throw new Error(`HTTP ${res.status} từ /${slug}: ${body.slice(0, 200)}`)
     }
     return parseSendResult(await res.json().catch(() => null))
   } catch (err) {
     if ((err as Error)?.name === 'AbortError') {
-      throw new Error(`timeout ${timeoutMs}ms tanpa balasan dari /${slug}`)
+      throw new Error(`Hết thời gian chờ ${timeoutMs}ms mà không có phản hồi từ /${slug}`)
     }
     throw err instanceof Error ? err : new Error(String(err))
   } finally {
@@ -232,5 +232,5 @@ export async function sendA2a(
 
 /** Teks giliran gagal: sebab nyata + penegasan bukan karangan. */
 export function failedTurnText(reason: string): string {
-  return `GAGAL: ${reason} — giliran ini bukan karangan LLM dan tidak digantikan.`
+  return `THẤT BẠI: ${reason} — lượt này không do LLM bịa ra và không được thay thế.`
 }

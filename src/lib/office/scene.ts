@@ -47,10 +47,12 @@ import {
 } from './layout'
 import type { Agent, AgentDivision, AgentRole, Meeting, Task } from '@/types/hermes'
 import { dutyOf, a2aTarget, type Duty, type WorkSignals } from './duty'
-import type { AvatarState } from './types'
+import { officeSeats, sceneRows } from './presentation'
+import { officeDivision, type AvatarState, type AvatarDisplay } from './types'
 
 export type SceneAgent = AnimAgent & {
   data: Agent
+  display?: AvatarDisplay
   /** Row id in `avatar_state` — what the DB writes are keyed on. */
   avatarId: string
   kind: 'dummy' | 'agent'
@@ -295,6 +297,7 @@ export function createScene(
   const byName = new Map<string, SceneAgent>()
   /** Division per name, so a meeting can be routed to the right room. */
   const divisionOf = new Map<string, AgentDivision>()
+  const officeDesks = new Map<string, number>()
   /** Latest avatar rows from the DB (positions restored on first sync). */
   let avatarRows: AvatarState[] = []
   /** Latest Hermes roster. */
@@ -343,6 +346,7 @@ export function createScene(
 
     const a: SceneAgent = {
       data,
+      display: row,
       avatarId: row.avatarId,
       kind: row.kind,
       level: row.level as Level,
@@ -374,7 +378,7 @@ export function createScene(
     }
     avatars.push(a)
     byName.set(row.name, a)
-    divisionOf.set(row.name, row.division)
+    divisionOf.set(row.name, officeDivision(row, data.division))
     setLabel(a)
 
     // Place the body at the position the DB remembers — that is the whole point
@@ -386,7 +390,7 @@ export function createScene(
 
   function setLabel(a: SceneAgent) {
     const el = a.label.element as HTMLDivElement
-    el.textContent = a.data.displayName
+    el.textContent = [a.display?.displayName ?? a.data.displayName ?? a.data.name, a.display?.roleLabel].filter(Boolean).join(' · ')
     el.dataset.status = a.data.status
     el.dataset.role = a.data.role
     el.dataset.kind = a.kind
@@ -411,8 +415,8 @@ export function createScene(
    * Reconcile the world with the DB rows + the Hermes roster.
    *
    * A name present in BOTH is a real agent (roster status wins). A name present
-   * only in the DB is a dummy: it walks and idles but has no task and costs
-   * nothing.
+   * only in the DB is rendered only when it is explicitly a dummy. Real
+   * settings rows do not confer membership.
    *
    * AN AGENT WITH NO DB ROW STILL GETS A BODY. Rows are only ever written by the
    * scene, so a freshly spawned agent — one that has never been saved — had no row
@@ -422,6 +426,7 @@ export function createScene(
    * exactly what spawning should look like.
    */
   function syncAvatars(rows: AvatarState[], agents: Agent[]) {
+    rows = sceneRows(rows, agents)
     avatarRows = rows
     agentRows = agents
     const agentByName = new Map(agents.map((a) => [a.name, a]))
@@ -447,9 +452,20 @@ export function createScene(
         facing: Math.PI,
         spawned: true,
         anchored: false,
+        useHermesDivision: true,
         updatedAt: new Date().toISOString(),
       }))
     const all = missing.length ? [...rows, ...missing] : rows
+    // Keep the source roster untouched. Only the scene's seating map changes.
+    const previousDivisions = new Map(divisionOf)
+    const previousDesks = new Map(officeDesks)
+    officeDesks.clear()
+    divisionOf.clear()
+    for (const agent of agents) {
+      const row = all.find((r) => r.name === agent.name)!
+      divisionOf.set(agent.name, officeDivision(row, agent.division))
+    }
+    for (const [name, desk] of officeSeats(agents, all)) officeDesks.set(name, desk)
 
     // Drop bodies the DB no longer lists AND the roster no longer has, UNLESS they
     // are real agents leaving.
@@ -467,6 +483,9 @@ export function createScene(
     for (const row of all) {
       const existing = byName.get(row.name)
       const data = agentByName.get(row.name) ?? dummyAgent(row)
+      const previousDivision = previousDivisions.get(row.name)
+      const division = officeDivision(row, data.division)
+      divisionOf.set(row.name, division)
       const kind: 'dummy' | 'agent' = agentByName.has(row.name) ? 'agent' : 'dummy'
       if (existing) {
         if (existing.leaving) existing.leaving = false
@@ -475,9 +494,17 @@ export function createScene(
           existing.data.deskIndex !== data.deskIndex ||
           existing.data.currentTaskId !== data.currentTaskId ||
           existing.kind !== kind
+        if (previousDesks.get(row.name) !== officeDesks.get(row.name) || previousDivision !== division || existing.display?.divisionOverride !== row.divisionOverride || existing.display?.useHermesDivision !== row.useHermesDivision) {
+          existing.path = []
+          existing.destKey = ''
+          existing.target = null
+          existing.restUntil = 0
+        }
+        existing.display = row
         existing.data = data
         existing.kind = kind
         existing.avatar.group.userData.kind = kind
+        setLabel(existing)
         if (changed) {
           existing.ease = 0
           setLabel(existing)
@@ -492,6 +519,7 @@ export function createScene(
         }
       }
     }
+    if (currentMeeting) meetingRoom = meetingRoomFor(currentMeeting.participants, divisionOf)
     restored = true
   }
 
@@ -614,7 +642,7 @@ export function createScene(
     const isDummy = a.kind === 'dummy'
     const meetingLive = meeting?.state === 'queued' || meeting?.state === 'running'
     const inMeeting = !!(meeting && meetingLive && meeting.participants.includes(a.data.name))
-    const myDesk = a.data.deskIndex != null ? deskByIndex(a.data.deskIndex) ?? null : null
+    const myDesk = officeDesks.has(a.data.name) ? deskByIndex(officeDesks.get(a.data.name)!) ?? null : null
     const a2a = a2aLive.get(a.data.name) ?? null
     const duty = dutyOf({
       inMeeting,
@@ -697,8 +725,8 @@ export function createScene(
     // (lihat `a2aTarget` di duty.ts). Tanpa meja sama sekali → jangan ke mana-mana.
     if (duty === 'a2a') {
       const pair = a2aLive.get(a.data.name)
-      const ownIdx = a.data.deskIndex ?? null
-      const t = a2aTarget(ownIdx, pair?.peerDesk ?? null, !!pair?.peer && pair.peer === a.data.name)
+      const ownIdx = officeDesks.get(a.data.name) ?? null
+      const t = a2aTarget(ownIdx, (pair?.peer ? officeDesks.get(pair.peer) : undefined) ?? pair?.peerDesk ?? null, !!pair?.peer && pair.peer === a.data.name)
       const desk = t ? deskByIndex(t.deskIndex) ?? null : null
       if (t && desk) {
         if (t.visit) {
@@ -912,7 +940,11 @@ export function createScene(
       out.push({
         avatarId: a.avatarId,
         name: a.data.name,
-        division: divisionOf.get(a.data.name) ?? 'tech',
+        displayName: a.display?.displayName,
+        divisionOverride: a.display?.divisionOverride,
+        roleLabel: a.display?.roleLabel,
+        useHermesDivision: a.display?.useHermesDivision ?? true,
+        division: a.data.division ?? 'exec',
         kind: a.kind,
         x: Number(g.position.x.toFixed(2)),
         z: Number(g.position.z.toFixed(2)),

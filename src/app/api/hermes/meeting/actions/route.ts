@@ -3,6 +3,7 @@ import { matchOwner, parseActionItems } from '@/lib/hermes/action-items'
 import { listAgents, listTasks } from '@/lib/hermes/kanban'
 import { visibleNames } from '@/lib/hermes/office-membership'
 import { listMeetings, readArchived } from '@/lib/hermes/meeting'
+import { assertApiRequest } from '@/lib/api-policy'
 
 export const dynamic = 'force-dynamic'
 
@@ -18,10 +19,12 @@ export const dynamic = 'force-dynamic'
  * rather than duplicated here.
  */
 export async function GET(req: NextRequest) {
+  const denied = assertApiRequest(req, 'read')
+  if (denied) return denied
   const from = req.nextUrl.searchParams.get('from')
   if (!from) {
     return NextResponse.json(
-      { error: { code: 'invalid_request', message: 'from=<meetingId> wajib', status: 400 } },
+      { error: { code: 'invalid_request', message: 'Bắt buộc có from=<meetingId>', status: 400 } },
       { status: 400 },
     )
   }
@@ -40,7 +43,7 @@ export async function GET(req: NextRequest) {
         {
           error: {
             code: 'invalid_request',
-            message: `rapat "${from}" tidak ditemukan`,
+            message: `Cuộc họp "${from}" không tìm thấy`,
             status: 404,
           },
         },

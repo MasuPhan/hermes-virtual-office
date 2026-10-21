@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { cancelMeeting } from '@/lib/hermes/meeting'
-import { assertLocalWriteRequest } from '@/lib/local-guard'
+import { assertApiRequest } from '@/lib/api-policy'
 
 export const dynamic = 'force-dynamic'
 
@@ -17,7 +17,7 @@ export const dynamic = 'force-dynamic'
  * permintaan baru = 200 `cancel_requested`.
  */
 export async function POST(req: NextRequest) {
-  const denied = assertLocalWriteRequest(req)
+  const denied = assertApiRequest(req, 'management-write')
   if (denied) return denied
   const body = await req.json().catch(() => ({}))
   const id = typeof body?.id === 'string' && body.id ? body.id : undefined
@@ -27,7 +27,7 @@ export async function POST(req: NextRequest) {
       {
         error: {
           code: 'no_running_meeting',
-          message: 'tidak ada rapat yang berjalan',
+          message: 'Không có cuộc họp đang diễn ra',
           status: 404,
         },
       },

@@ -3,12 +3,15 @@ import { createTask, listAgents, listAssignees, listTasks } from '@/lib/hermes/k
 import { visible } from '@/lib/hermes/office-membership'
 import { blockedAssigneesFor } from '@/lib/hermes/approvals'
 import type { TaskOrigin } from '@/types/hermes'
-import { assertLocalWriteRequest } from '@/lib/local-guard'
+import { assertApiRequest } from '@/lib/api-policy'
+import { validateAssigneeName } from '@/lib/hermes/profile-name'
 
 export const dynamic = 'force-dynamic'
 
 /** The board: tasks plus the agents staffing them. */
-export async function GET() {
+export async function GET(req: NextRequest) {
+  const denied = assertApiRequest(req, 'read')
+  if (denied) return denied
   try {
     // `--archived` is inclusive, so this is the live board PLUS the archive: the
     // 2D view has an ARSIP column that stayed permanently empty without it.
@@ -48,11 +51,11 @@ export async function GET() {
  * panel can list what it produced. It is written to `created_by` as a marker.
  */
 export async function POST(req: NextRequest) {
-  const denied = assertLocalWriteRequest(req)
+  const denied = assertApiRequest(req, 'management-write')
   if (denied) return denied
   const body = await req.json().catch(() => null)
   if (!body || typeof body !== 'object') {
-    return bad('body harus JSON')
+    return bad('body phải là JSON')
   }
 
   const origin = readOrigin((body as Record<string, unknown>).origin)
@@ -60,8 +63,8 @@ export async function POST(req: NextRequest) {
   // ---- batch shape: { items: [...] } ----
   const items = (body as Record<string, unknown>).items
   if (Array.isArray(items)) {
-    if (!origin) return bad('origin.kind tidak dikenal')
-    if (!items.length) return bad('tidak ada item')
+    if (!origin) return bad('origin.kind không xác định')
+    if (!items.length) return bad('Không có mục nào')
     return createMany(items, origin)
   }
 
@@ -71,14 +74,20 @@ export async function POST(req: NextRequest) {
     typeof (body as { assignee?: unknown }).assignee === 'string'
       ? (body as { assignee: string }).assignee.trim()
       : ''
-  if (!title) return bad('title wajib')
-  if (!assignee) return bad('assignee wajib')
+  if (!title) return bad('Bắt buộc nhập title')
+  if (!assignee) return bad('Bắt buộc chọn assignee')
+  let safeAssignee: string
+  try {
+    safeAssignee = validateAssigneeName(assignee)
+  } catch (err) {
+    return bad((err as Error).message)
+  }
 
   const b = body as Record<string, unknown>
   try {
     const task = await createTask({
       title: title.slice(0, 300),
-      assignee,
+      assignee: safeAssignee,
       body: typeof b.body === 'string' ? b.body : undefined,
       priority: Number.isFinite(Number(b.priority)) ? Number(b.priority) : undefined,
       origin,
@@ -125,10 +134,16 @@ async function createMany(raw: unknown[], origin: TaskOrigin) {
   for (const it of raw.slice(0, 25)) {
     const row = (it ?? {}) as Record<string, unknown>
     const title = String(row.title ?? row.text ?? '').trim().slice(0, 300)
-    const assignee = String(row.assignee ?? '').trim()
+    let assignee: string
+    try {
+      assignee = validateAssigneeName(String(row.assignee ?? '').trim())
+    } catch (err) {
+      if (title) failed.push({ title, error: (err as Error).message })
+      continue
+    }
     if (!title) continue
     if (!assignee) {
-      failed.push({ title, error: 'penanggung belum dipilih' })
+      failed.push({ title, error: 'Chưa chọn người phụ trách' })
       continue
     }
     try {

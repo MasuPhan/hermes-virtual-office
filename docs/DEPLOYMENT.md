@@ -230,8 +230,16 @@ error-nya sendiri sudah menyebut cara memperbaikinya:
 
 ```bash
 # .env.local
-ALLOWED_ORIGINS=203.0.113.10:3300,office.example.com
+# Full origin = exact scheme + host + port. A bare host is plain http.
+ALLOWED_ORIGINS=https://office.example.com,http://127.0.0.1:3001
 ```
+
+> **HVO-SAFETY-01.** All API methods (including GET) now require a trusted Host.
+> Mutations require an exact trusted Origin; `X-Forwarded-*` is never trusted.
+> Management is SAFE/read-only by default: set `HVO_MANAGEMENT_MODE=write` to
+> allow real Hermes/LLM mutations, and `HVO_ALLOW_PRIVILEGED=1` for destructive
+> actions. There is still **no authentication**; this is a local single-user
+> tool. Binding to loopback is not authentication.
 
 ### 7.6 Modal minimum per fitur
 

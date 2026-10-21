@@ -10,7 +10,8 @@ import {
 } from '@/lib/hermes/chat'
 import { listAgents, listProfiles, listTasks } from '@/lib/hermes/kanban'
 import { visibleNames } from '@/lib/hermes/office-membership'
-import { assertLocalWriteRequest } from '@/lib/local-guard'
+import { assertApiRequest } from '@/lib/api-policy'
+import { validateProfileName } from '@/lib/hermes/profile-name'
 
 export const dynamic = 'force-dynamic'
 
@@ -35,6 +36,8 @@ async function chatProfiles(): Promise<string[]> {
 }
 
 export async function GET(req: NextRequest) {
+  const denied = assertApiRequest(req, 'read')
+  if (denied) return denied
   const agent = req.nextUrl.searchParams.get('agent')
   try {
     // `?live=1` — siapa yang sedang diajak bicara, untuk kantor (agent pergi ke mejanya).
@@ -75,7 +78,13 @@ export async function GET(req: NextRequest) {
       })
     }
 
-    const session = await getChatSession(agent)
+    let readAgent: string
+    try {
+      readAgent = validateProfileName(agent, { allowDefault: true })
+    } catch (err) {
+      return bad((err as Error).message)
+    }
+    const session = await getChatSession(readAgent)
     if (!session) {
       // No thread yet is a normal state, not an error: the panel shows an empty
       // conversation and the first message creates it.
@@ -95,29 +104,35 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const denied = assertLocalWriteRequest(req)
+  const denied = assertApiRequest(req, 'management-write')
   if (denied) return denied
   const body = await req.json().catch(() => null)
   const agent = typeof body?.agent === 'string' ? body.agent.trim() : ''
   const message = typeof body?.message === 'string' ? body.message : ''
 
   if (!agent) {
-    return bad('agent wajib')
+    return bad('Bắt buộc chọn tác tử')
+  }
+  let cleanAgent: string
+  try {
+    cleanAgent = validateProfileName(agent, { allowDefault: true })
+  } catch (err) {
+    return bad((err as Error).message)
   }
   if (!message.trim()) {
-    return bad('pesan kosong')
+    return bad('Tin nhắn trống')
   }
 
   try {
     // The agent name IS the profile name. One agent, one profile, one memory store.
-    const profile = agent
+    const profile = cleanAgent
 
     const known = await listProfiles()
     if (!known.includes(profile)) {
-      return bad(`profil "${profile}" tidak ada — buat agentnya dulu`)
+      return bad(`Hồ sơ "${profile}" không tồn tại — hãy tạo tác tử trước`)
     }
 
-    const result = await sendChatMessage(agent, profile, message)
+    const result = await sendChatMessage(cleanAgent, profile, message)
     return NextResponse.json({
       success: true,
       session: result.session,
@@ -132,13 +147,19 @@ export async function POST(req: NextRequest) {
 }
 
 export async function DELETE(req: NextRequest) {
-  const denied = assertLocalWriteRequest(req)
+  const denied = assertApiRequest(req, 'management-write')
   if (denied) return denied
   const agent = req.nextUrl.searchParams.get('agent')
-  if (!agent) return bad('agent wajib')
+  if (!agent) return bad('Bắt buộc chọn tác tử')
+  let cleanAgent: string
   try {
-    await resetChatSession(agent)
-    return NextResponse.json({ success: true, agent, reset: true })
+    cleanAgent = validateProfileName(agent, { allowDefault: true })
+  } catch (err) {
+    return bad((err as Error).message)
+  }
+  try {
+    await resetChatSession(cleanAgent)
+    return NextResponse.json({ success: true, agent: cleanAgent, reset: true })
   } catch (err) {
     return NextResponse.json(
       { error: { code: 'chat_failed', message: (err as Error).message, status: 502 } },

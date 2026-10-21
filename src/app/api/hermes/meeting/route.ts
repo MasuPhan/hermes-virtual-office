@@ -10,7 +10,7 @@ import {
 import { listAgents, listTasks } from '@/lib/hermes/kanban'
 import { listServedAgents } from '@/lib/hermes/a2a-served'
 import { visibleNames } from '@/lib/hermes/office-membership'
-import { assertLocalWriteRequest } from '@/lib/local-guard'
+import { assertApiRequest } from '@/lib/api-policy'
 
 export const dynamic = 'force-dynamic'
 
@@ -24,12 +24,14 @@ export const dynamic = 'force-dynamic'
  * `GET /api/hermes/meeting?id=<meetingId>` returns one archived transcript.
  */
 export async function GET(req: NextRequest) {
+  const denied = assertApiRequest(req, 'read')
+  if (denied) return denied
   const id = req.nextUrl.searchParams.get('id')
   if (id) {
     const body = await readArchived(id)
     if (body === null) {
       return NextResponse.json(
-        { error: { code: 'invalid_request', message: `rapat "${id}" tidak ditemukan`, status: 404 } },
+        { error: { code: 'invalid_request', message: `Cuộc họp "${id}" không tìm thấy`, status: 404 } },
         { status: 404 },
       )
     }
@@ -63,7 +65,7 @@ export async function GET(req: NextRequest) {
  * the old LLM-voices-everyone behavior, labelled honestly in the archive.
  */
 export async function POST(req: NextRequest) {
-  const denied = assertLocalWriteRequest(req)
+  const denied = assertApiRequest(req, 'management-write')
   if (denied) return denied
   const body = await req.json().catch(() => ({}))
   const mode = body?.mode === 'a2a' ? 'a2a' : 'simulasi'
@@ -92,7 +94,7 @@ export async function POST(req: NextRequest) {
         {
           error: {
             code: 'invalid_request',
-            message: mode === 'a2a' ? formatReject([...new Set(unknown)]) : `peserta tak dikenal: ${[...new Set(unknown)].join(', ')}`,
+            message: mode === 'a2a' ? formatReject([...new Set(unknown)]) : `Người tham gia không xác định: ${[...new Set(unknown)].join(', ')}`,
             status: 400,
           },
         },
@@ -104,7 +106,7 @@ export async function POST(req: NextRequest) {
         {
           error: {
             code: 'invalid_request',
-            message: 'pilih minimal 2 peserta yang dikenal',
+            message: 'Chọn ít nhất 2 người tham gia hợp lệ',
             status: 400,
           },
         },

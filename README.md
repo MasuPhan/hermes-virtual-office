@@ -109,9 +109,7 @@ stores the thread in its memory. The **Agent** panel creates a profile the same 
 
 ```bash
 hermes profile create <name> --no-skills
-```
-
-**Picking a model also copies the provider definition.** The model picker lists real providers from `hermes config get custom_providers --json` (`listCustomProviders` / `providersToModels` in `src/lib/hermes/kanban.ts`), and choosing a model writes both the model and its provider into the profile (`setProfileModel` in `src/lib/hermes/kanban.ts`, called from `POST /api/hermes/agents`). Without that copy the agent dies with `Unknown provider` even though a default model is set — the doctor's `model-providers` check watches for exactly this (`src/lib/hermes/doctor.ts`).
+```**Picking a model also copies the provider definition.** The model picker lists real providers from `hermes config get custom_providers --json` (`listCustomProviders` / `providersToModels` in `src/lib/hermes/kanban.ts`), and choosing a model writes both the model and its provider into the profile (`setProfileModel` in `src/lib/hermes/kanban.ts`, called from `POST /api/hermes/agents`). Without that copy the agent dies with `Unknown provider` even though a default model is set — the doctor's `model-providers` check watches for exactly this (`src/lib/hermes/doctor.ts`).
 
 Each agent's **Description** becomes the text other agents see when they discover it, and
 **Keahlian / domain** is a domain map used by the office to work out who owns what. That map
@@ -251,7 +249,7 @@ hermes config get custom_providers --json
 ## 🚀 Quick Start
 
 ### Prerequisites
-- Node.js 18.17+ or 20+
+- Node.js **22.22.3 or newer** (`node:sqlite` is used by the office database)
 - A local Hermes install (the board is driven through its CLI)
 - npm, pnpm, or bun
 
@@ -280,7 +278,16 @@ HERMES_BIN=/usr/local/bin/hermes
 AI_BASE_URL=https://api.openai.com/v1
 AI_API_KEY=your_llm_key
 AI_MODEL=gpt-4o-mini
+
+# Safety default: read views + office SQLite state only. Set to `write` only when
+# you intend to manage real Hermes profiles/tasks/chat/meetings.
+HVO_MANAGEMENT_MODE=safe
 ```
+
+**Fleet scope.** `HVO_HERMES_ROOT` must name the Hermes install root (the
+directory containing `profiles/`), not a named-profile home. If unset,
+`HERMES_HOME` is used only when it is not `…/profiles/<name>`; a mis-scoped value
+fails with a diagnostic rather than reading/writing the wrong profile.
 
 Every variable in `.env.example` is read by the code — there are no decorative
 settings. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for what each drives.
@@ -411,7 +418,8 @@ Two commands cover the invariants a screenshot cannot:
 
 ```bash
 npm run typecheck   # types, including the layout and pose tables
-npm run selftest    # 113 measured invariants
+npm run selftest    # measured invariants
+npm run safety-regression  # HVO-SAFETY-01 focused regression checks
 ```
 
 `npm run selftest` asserts what actually broke while this was built. It covers four kinds of

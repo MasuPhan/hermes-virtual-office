@@ -7,6 +7,18 @@ never statically cached, because the board changes underneath them.
 There is no SSE stream and no authentication layer. The browser talks to these
 routes on the same origin, and the server talks to the local `hermes` CLI.
 
+> **HVO-SAFETY-01 update.** The server now has a common trusted-Host fence for
+> every API method (including GET) and an exact trusted-Origin check for
+> mutations. Management is **SAFE/read-only by default**
+> (`HVO_MANAGEMENT_MODE=safe`); real Hermes/LLM mutations require
+> `HVO_MANAGEMENT_MODE=write`, and destructive actions additionally require
+> `HVO_ALLOW_PRIVILEGED=1`. A2A served-agent config writing is disabled in this
+> patch, `POST /gateway-restart` returns 501 `restart_disabled`, and the per-card
+> task `run` action returns 501 `run_disabled`. Sections below that describe the
+> old behaviour are superseded by `SAFETY-PATCH-HANDOFF.md`. This is still a
+> local single-user tool without authentication; Host/Origin checks are not a
+> login.
+
 ---
 
 ## 0. How the server reaches Hermes
@@ -1175,3 +1187,20 @@ Probed against code 2026-10-09; the old text was wrong on these points:
   `meeting_actions_failed` / `cron_actions_failed` / `verification_failed` /
   `evidence_failed` (502/503), `office_db_failed` / `office_write_failed`
   (500), `no_candidate` (400).
+
+
+Office avatar presentation settings (office-only)
+
+`POST /api/hermes/office` accepts `setAvatarDisplay` with `avatarId`,
+`displayName` (max 80), `roleLabel` (max 80), `divisionOverride`
+(`exec|tech|growth|content`), and boolean `useHermesDivision`.
+`resetAvatarDisplay` clears these overrides. Both require the trusted Host/Origin
+office-write guard and return `{ avatar }`. Invalid settings return 400.
+For an absent row, only a canonical `agent:<name>` verified against on-disk
+profiles or the assignee roster can create a row; unknown identities return 404.
+Client identity, position, kind and spawn fields are ignored for this operation.
+Settings live in additive columns on `avatar_state`; stale position batches
+cannot replace them. A settings row does not create a Hermes profile, change
+membership, or render an outside agent. The Tác tử panel exposes the editor for
+both inside and outside roster rows in all views. Canonical names and task
+assignments remain unchanged.

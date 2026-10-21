@@ -32,13 +32,25 @@ Specifically:
 ## Deploying it
 
 **The office has no authentication.** Anyone who can reach the port can read the
-board, create tasks, start meetings, create and delete cron jobs, and create or
-delete agent profiles. That is the intended design for a local control surface,
-and it is why the deployment docs put it behind a reverse proxy with TLS and, if
-it is exposed beyond localhost, an auth layer.
+board. This is a local single-user control surface, not a multi-user service.
+Binding to loopback is **not** authentication: any local process that can reach
+the port can supply trusted HTTP headers. Do not expose it on a LAN or the public
+internet without a real authentication layer in front of it.
 
-Do not expose it to the public internet without putting authentication in front
-of it. See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
+The patch in this tree adds two defence-in-depth fences, not login:
+
+- A common trusted-Host ingress check for **every** API method (including GET),
+  and exact trusted-Origin checks for mutations. `X-Forwarded-*` headers are
+  never trusted.
+- A default **SAFE/read-only management mode** (`HVO_MANAGEMENT_MODE=safe`).
+  Read views and the office's own SQLite name/avatar state work; real Hermes
+  mutations, chat/meeting agent calls and task/board writes are refused until the
+  operator explicitly sets `HVO_MANAGEMENT_MODE=write`. Destructive actions
+  (kill, selfrepair, restart, pause-all, fallback chain) require the additional
+  explicit `HVO_ALLOW_PRIVILEGED=1`.
+
+Even in write mode, this is still a single-user tool with no user accounts. See
+[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
 
 ## Scope
 

@@ -15,12 +15,16 @@
  */
 
 import { existsSync, readFileSync, statSync } from 'node:fs'
-import { homedir } from 'node:os'
 import { join } from 'node:path'
+import { resolveFleetRoot } from './root'
 
-const HERMES = process.env.HERMES_HOME || join(homedir(), '.hermes')
-const AGENT_LOG = join(HERMES, 'logs', 'agent.log')
-const ERROR_LOG = join(HERMES, 'logs', 'errors.log')
+function defaultPaths(): { agentLog: string; errorLog: string } {
+  const root = resolveFleetRoot(process.env)
+  return {
+    agentLog: join(root, 'logs', 'agent.log'),
+    errorLog: join(root, 'logs', 'errors.log'),
+  }
+}
 
 /**
  * Di bawah ini, rasionya tidak bermakna.
@@ -89,8 +93,9 @@ export function readProviders(
    */
   paths?: { agentLog?: string; errorLog?: string },
 ): ProviderReport {
-  const agentLog = paths?.agentLog ?? AGENT_LOG
-  const errorLog = paths?.errorLog ?? ERROR_LOG
+  const fallbackPaths = defaultPaths()
+  const agentLog = paths?.agentLog ?? fallbackPaths.agentLog
+  const errorLog = paths?.errorLog ?? fallbackPaths.errorLog
   const cutoff = now - windowHours * 3_600_000
   const inWindow = (line: string): boolean => {
     const m = STAMP.exec(line)

@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { getTaskDetail, listTasks } from '@/lib/hermes/kanban'
 import { readApprovalPatterns, readApprovalPolicy, readApprovalQueue } from '@/lib/hermes/approvals'
 import { assessHealth } from '@/lib/office/health'
+import { assertApiRequest } from '@/lib/api-policy'
 
 export const dynamic = 'force-dynamic'
 
@@ -16,7 +17,9 @@ export const dynamic = 'force-dynamic'
  * Detail task diambil dengan aturan yang sama dengan `/api/hermes/board`: hanya untuk
  * blocked/running/review, maksimal 40, karena tiap `kanban show` adalah satu proses Python.
  */
-export async function GET() {
+export async function GET(req: Request) {
+  const denied = assertApiRequest(req, 'read')
+  if (denied) return denied
   try {
     // Pola dimulai PALING DULU: dia yang paling lambat (sampai 25 dtk), jadi jalan sambil task dibaca.
     const patternsP = readApprovalPatterns()

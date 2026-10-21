@@ -2,10 +2,12 @@
 
 import { create } from 'zustand'
 import type { Agent, ArchivedMeeting, Meeting, Task } from '@/types/hermes'
-import type { AvatarState } from './office/types'
+import type { AvatarDisplay, AvatarState } from './office/types'
 import type { Health } from './office/health'
 import type { CronPulse, WorkSignals, A2aPair } from './office/duty'
 import { fetchJson } from './api'
+
+let displayRevision = 0
 
 const POLL_MS = Number(process.env.NEXT_PUBLIC_POLL_MS || 4000)
 
@@ -55,6 +57,7 @@ type State = {
   setOfficeName: (name: string) => Promise<void>
   /** Batch position flush from the 3D scene — the DB write behind idle wander. */
   saveAvatars: (list: AvatarState[]) => Promise<void>
+  setAvatarDisplay: (avatarId: string, settings: AvatarDisplay | null) => Promise<void>
   setView: (v: '3d' | '2d' | 'sprite') => void
   setPeek: (desk: number | null) => void
   openTask: (taskId: string | null) => void
@@ -78,12 +81,12 @@ export const useOffice = create<State>((set) => ({
   openTaskId: null,
   newTaskOpen: false,
 
-  officeName: 'Hermes Office',
+  officeName: 'Văn phòng Hermes',
   avatars: [],
 
   // Mulai dari TIDAK TAHU, bukan dari hijau. Sistem yang belum selesai membaca keadaannya
   // tidak boleh tampil sehat — itu kebohongan yang paling gampang terjadi.
-  health: { level: 'warn', reasons: ['belum membaca keadaan sistem'] },
+  health: { level: 'warn', reasons: ['Chưa đọc trạng thái hệ thống'] },
 
   work: { chatLive: [], cron: null, a2a: [] },
 
@@ -110,14 +113,14 @@ export const useOffice = create<State>((set) => ({
         cache: 'no-store',
       })
       if (!res.ok || !res.data?.health) {
-        set({ health: { level: 'bad', reasons: [res.error || 'tidak bisa membaca keadaan sistem'] } })
+        set({ health: { level: 'bad', reasons: [res.error || 'Không thể đọc trạng thái hệ thống'] } })
         return
       }
       set({ health: res.data.health })
     } catch (e) {
       // Kalau pembacaannya sendiri gagal, itu MERAH — bukan "tetap seperti tadi". Diam
       // beberapa detik itu wajar; tapi menampilkan keadaan lama sebagai sekarang tidak.
-      set({ health: { level: 'bad', reasons: [`tidak bisa membaca keadaan sistem: ${(e as Error).message}`] } })
+      set({ health: { level: 'bad', reasons: [`Không thể đọc trạng thái hệ thống: ${(e as Error).message}`] } })
     }
   },
 
@@ -126,7 +129,7 @@ export const useOffice = create<State>((set) => ({
       cache: 'no-store',
     })
     if (!res.ok || !res.data) {
-      set({ error: res.error || 'gagal memuat papan', loading: false })
+      set({ error: res.error || 'Không thể tải bảng', loading: false })
       return
     }
     set({ tasks: res.data.tasks || [], agents: res.data.agents || [], error: null, loading: false })
@@ -138,13 +141,14 @@ export const useOffice = create<State>((set) => ({
    * and this endpoint reads data/office.db, not the CLI.
    */
   async loadOffice() {
+    const revision = displayRevision
     const res = await fetchJson<{
       name?: string
       avatars?: AvatarState[]
     }>('/api/hermes/office', { cache: 'no-store' })
-    if (!res.ok || !res.data) return
+    if (!res.ok || !res.data || revision !== displayRevision) return
     set({
-      officeName: res.data.name || 'Hermes Office',
+      officeName: res.data.name || 'Văn phòng Hermes',
       avatars: res.data.avatars || [],
     })
   },
@@ -168,6 +172,17 @@ export const useOffice = create<State>((set) => ({
       method: 'POST',
       body: JSON.stringify({ action: 'saveAvatars', list }),
     })
+  },
+
+  async setAvatarDisplay(avatarId, settings) {
+    const res = await fetchJson<{ avatar: AvatarState }>('/api/hermes/office', {
+      method: 'POST',
+      body: JSON.stringify({ action: settings ? 'setAvatarDisplay' : 'resetAvatarDisplay', avatarId, ...settings }),
+    })
+    if (!res.ok || !res.data?.avatar) throw new Error(res.error || 'Không thể lưu hiển thị')
+    displayRevision++
+    const avatar = res.data.avatar
+    set((state) => ({ avatars: [...state.avatars.filter((a) => a.avatarId !== avatar.avatarId), avatar] }))
   },
 
   async refreshMeeting() {

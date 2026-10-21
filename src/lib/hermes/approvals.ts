@@ -25,6 +25,8 @@ import { promisify } from 'node:util'
 import type { Task } from '@/types/hermes'
 import { readBoard, type BoardReadout } from './board'
 import { activeTaskByAssignee, getTaskDetail } from './kanban'
+import { fleetRootEnv } from './root'
+import { errorTail } from './redact'
 
 const run = promisify(execFile)
 const HERMES_BIN = process.env.HERMES_BIN || 'hermes'
@@ -56,7 +58,7 @@ export function isApprovalsStale(ageSeconds: number): boolean {
 
 /** Sama dengan `cleanEnv` di kanban.ts: variabel sesi chat tidak boleh bocor ke proses CLI. */
 function cliEnv(): NodeJS.ProcessEnv {
-  const env = { ...process.env }
+  const env = fleetRootEnv(process.env)
   for (const k of Object.keys(env)) if (k.startsWith('HERMES_SESSION_')) delete env[k]
   return env
 }
@@ -64,9 +66,9 @@ function cliEnv(): NodeJS.ProcessEnv {
 /** Pesan gagal yang bisa dibaca operator, termasuk membedakan TIMEOUT dari gagal biasa. */
 function whyFailed(err: unknown, slow: string): string {
   const e = err as NodeJS.ErrnoException & { killed?: boolean; signal?: string; stderr?: string }
-  if (e.code === 'ENOENT') return `hermes CLI tidak ditemukan ("${HERMES_BIN}")`
+  if (e.code === 'ENOENT') return `Không tìm thấy Hermes CLI ("${HERMES_BIN}")`
   if (e.killed || e.signal === 'SIGTERM') return slow
-  return (e.stderr || e.message || 'gagal tanpa pesan').trim().split('\n').slice(-1)[0]
+  return errorTail(e, 300)
 }
 
 const ageOf = (readAt: string) => Math.max(0, Math.round((Date.now() - Date.parse(readAt)) / 1000))
@@ -97,13 +99,13 @@ export async function readApprovalPolicy(): Promise<ApprovalPolicy> {
       maxBuffer: 1024 * 1024,
     }))
   } catch (err) {
-    return { ...empty, failure: whyFailed(err, `config get lambat (>${POLICY_TIMEOUT_MS / 1000} dtk)`) }
+    return { ...empty, failure: whyFailed(err, `config get phản hồi chậm (>${POLICY_TIMEOUT_MS / 1000} giây)`) }
   }
   const start = out.search(/[{]/)
-  if (start < 0) return { ...empty, failure: 'kunci "approvals" tidak ada di config' }
+  if (start < 0) return { ...empty, failure: 'Không có khóa "approvals" trong cấu hình' }
   try {
     const raw = JSON.parse(out.slice(start)) as { mode?: unknown; timeout?: unknown; deny?: unknown }
-    if (typeof raw.mode !== 'string') return { ...empty, failure: 'config approvals tidak punya "mode"' }
+    if (typeof raw.mode !== 'string') return { ...empty, failure: 'Cấu hình approvals không có "mode"' }
     const timeout = Number(raw.timeout)
     return {
       mode: raw.mode,
@@ -113,7 +115,7 @@ export async function readApprovalPolicy(): Promise<ApprovalPolicy> {
       ageSeconds: 0,
     }
   } catch {
-    return { ...empty, failure: 'keluaran config approvals bukan JSON' }
+    return { ...empty, failure: 'Đầu ra config approvals không phải JSON' }
   }
 }
 
@@ -157,7 +159,7 @@ async function scanPatterns(): Promise<Omit<ApprovalPatterns, 'ageSeconds'>> {
       { env: cliEnv(), timeout: SUGGEST_TIMEOUT_MS, maxBuffer: 4 * 1024 * 1024 },
     ))
   } catch (err) {
-    return { ...empty, failure: whyFailed(err, `suggest lambat (>${SUGGEST_TIMEOUT_MS / 1000} dtk)`) }
+    return { ...empty, failure: whyFailed(err, `suggest phản hồi chậm (>${SUGGEST_TIMEOUT_MS / 1000} giây)`) }
   }
   const start = out.search(/[{]/)
   // Keluar tanpa apa pun = tidak ada pola yang memenuhi syarat. Itu jawaban, bukan kegagalan.
@@ -176,7 +178,7 @@ async function scanPatterns(): Promise<Omit<ApprovalPatterns, 'ageSeconds'>> {
     })
     return { ...empty, count: proposals.length, proposals }
   } catch {
-    return { ...empty, failure: 'keluaran suggest bukan JSON' }
+    return { ...empty, failure: 'Đầu ra suggest không phải JSON' }
   }
 }
 
