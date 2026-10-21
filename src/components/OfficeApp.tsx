@@ -116,7 +116,7 @@ export default function OfficeApp() {
   const pct = live.length ? Math.round((done / live.length) * 100) : 0
 
   return (
-    <div ref={rootRef} className="relative h-dvh w-full overflow-hidden bg-[#0f1418]">
+    <div ref={rootRef} className="relative h-dvh w-full overflow-hidden bg-[var(--bg)]">
       <main className="vp-stage">
         {view === '3d' ? (
           <Scene3D
