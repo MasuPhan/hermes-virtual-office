@@ -606,8 +606,8 @@ button.vp-run:hover { border-left-color: var(--accent); background: #2efcff0a; }
 /* sprite-office: retro pixel scene; view is rendered from the shared 3D room plan */
 .vp-sprite-toggle button { padding-inline: 9px; }
 .vp-sprite-toggle button.on { background: #8e70f533; color: #d9ccfc; font-weight: 700; box-shadow: inset 0 0 0 1px #8e70f580; }
-.vp-k2d { background: radial-gradient(100% 100% at 50% 100%, #3809954d 0%, transparent 60%), var(--bg); }
-.vp-sprite-office { background: radial-gradient(100% 100% at 50% 100%, #3809954d 0%, transparent 60%), var(--bg); }
+.vp-k2d { background: radial-gradient(100% 100% at 50% 100%, #38099522 0%, transparent 55%), var(--bg); }
+.vp-sprite-office { background: radial-gradient(100% 100% at 50% 100%, #38099522 0%, transparent 55%), var(--bg); }
 .vp-sprite-hud {
   position: sticky; top: 70px; z-index: 4; display: flex; gap: 12px; align-items: center;
   width: max-content; max-width: calc(100% - 24px); margin: 10px auto 8px; padding: 6px 10px;

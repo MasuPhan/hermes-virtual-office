@@ -42,14 +42,15 @@ const sy = (x: number, z: number) => OY + (x + z) * T / 2
 type Pt = [number, number]
 const at = (x: number, z: number, y = 0): Pt => [sx(x, z), sy(x, z) - y * U]
 
-/* OXMODE retro palette: violet floors/walls, cyan screens and glass. Props that are
-   not listed here go through `palCss`, the same re-skin rule as the 3D view. */
+/* Readable retro palette: warm wood floors, light walls, natural greens. Brand colours
+   (cyan/violet) only on accents: screens, status dots, selection. Props that are not
+   listed here go through `palCss`, the same rule as the 3D view (slightly cooled greys). */
 const C = {
-  floorA: '#2a1a66', floorB: '#33207a',
-  wallTop: '#8e70f5', wallSide: '#4a2fa8', partTop: '#7a5fd8', partSide: '#3d2a8f',
-  wood: '#3a1f5c', woodTop: '#5a3590', metal: '#4a536a', screen: '#2efcff',
-  rug: '#1f6f80', rug2: '#3b2d78', leaf: '#1f8a70', leaf2: '#2bb38a', pot: '#6d45e0',
-  cream: '#d9ccfc', sofa: '#6d45e0', board: '#0b3a4a', glass: '#6cf8ff',
+  floorA: '#b6955f', floorB: '#c1a26c',
+  wallTop: '#e4e6e8', wallSide: '#c4cad0', partTop: '#d4d7da', partSide: '#a9b0b7',
+  wood: '#8d6238', woodTop: '#c69a5c', metal: '#5b6a73', screen: '#2efcff',
+  rug: '#6f8f6b', rug2: '#5f7fa0', leaf: '#4f8149', leaf2: '#6da05c', pot: '#a86a4c',
+  cream: '#efe6cd', sofa: '#4f7ba3', board: '#2f5a45', glass: '#8fc3cc',
 }
 
 /**
@@ -61,7 +62,7 @@ const C = {
  * gets the same read — and the boundary is `paletteFor`, so both views agree on
  * when night starts.
  */
-const NIGHT_WASH = 'rgba(8,2,28,0.42)'
+const NIGHT_WASH = 'rgba(12,18,34,0.36)'
 
 function poly(ctx: CanvasRenderingContext2D, pts: Pt[], fill: string) {
   ctx.fillStyle = fill
@@ -106,7 +107,7 @@ function buildStatic(): HTMLCanvasElement {
   cv.height = H
   const ctx = cv.getContext('2d')!
   ctx.imageSmoothingEnabled = false
-  ctx.fillStyle = '#050117'
+  ctx.fillStyle = '#11161d'
   ctx.fillRect(0, 0, W, H)
 
   // Painter's order: sort by depth (x + z); the exec floor is drawn after the
@@ -470,7 +471,7 @@ function person(
   ctx.fillStyle = '#1b242b66'
   ctx.beginPath(); ctx.ellipse(cx, cy, 9, 4, 0, 0, Math.PI * 2); ctx.fill()
   if (selected) {
-    ctx.strokeStyle = palCss('#e6c35f')
+    ctx.strokeStyle = '#2efcff'
     ctx.lineWidth = 1
     ctx.strokeRect(cx - 11, y - 31 + bob, 22, 35)
   }
