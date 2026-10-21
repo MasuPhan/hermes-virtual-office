@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { VERIFICATION_BATCH_CAP } from '@/lib/hermes/verification'
 import { verificationMarks } from '@/lib/hermes/kanban'
 import { assertApiRequest } from '@/lib/api-policy'
+import { inRequestBoard } from '@/lib/hermes/board-request'
 
 export const dynamic = 'force-dynamic'
 
@@ -12,7 +13,7 @@ export const dynamic = 'force-dynamic'
  * RINGKAS: hanya `kanban show --json` per id (status + events), tanpa log dan lampiran.
  * Maksimal VERIFICATION_BATCH_CAP id diperiksa; sisanya `unchecked` (netral, tidak dinilai).
  */
-export async function POST(req: NextRequest) {
+async function handlePOST(req: NextRequest) {
   const denied = assertApiRequest(req, 'read')
   if (denied) return denied
   const body = await req.json().catch(() => ({}))
@@ -39,4 +40,9 @@ export async function POST(req: NextRequest) {
       { status: 502 },
     )
   }
+}
+
+/* Board scope: `?board=<slug>` → every CLI call in the handler gets `--board <slug>`. */
+export async function POST(req: NextRequest) {
+  return inRequestBoard(req, () => handlePOST(req))
 }

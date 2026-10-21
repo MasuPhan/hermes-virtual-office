@@ -239,7 +239,8 @@ export function readApprovalQueue(tasks: Task[], detail: Map<string, { events: E
  */
 export async function blockedAssigneesFor(tasks: Task[]): Promise<Set<string>> {
   const active = [...activeTaskByAssignee(tasks).values()]
-  const details = await Promise.all(active.map((t) => getTaskDetail(t.id)))
+  // `t.board`: with all-board aggregation an active task may live on another board.
+  const details = await Promise.all(active.map((t) => getTaskDetail(t.id, t.board)))
   const detail = new Map(active.map((t, i) => [t.id, { events: details[i]?.events || [] }]))
   return readApprovalQueue(active, detail).blockedAgentIds
 }

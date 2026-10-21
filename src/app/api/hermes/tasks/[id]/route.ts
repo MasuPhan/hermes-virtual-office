@@ -10,6 +10,7 @@ import {
   unblockTask,
 } from '@/lib/hermes/kanban'
 import { assertApiRequest } from '@/lib/api-policy'
+import { inRequestBoard } from '@/lib/hermes/board-request'
 
 export const dynamic = 'force-dynamic'
 
@@ -35,7 +36,7 @@ const RUN_SELECTED_CARD_DISABLED_REASON =
  * 200 with an empty payload — a misspelled or deleted task looked like a real task
  * that simply had no runs. A 404 is the honest answer.
  */
-export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
+async function handleGET(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const denied = assertApiRequest(req, 'read')
   if (denied) return denied
   const { id } = await ctx.params
@@ -62,7 +63,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
  * the UI. `run` does one dispatch pass (the worker it spawns is detached and
  * outlives this request) and `promote` returns a blocked task to `ready`.
  */
-export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
+async function handlePOST(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   // The disabled `run` action is answered clearly in every mode; other actions
   // still require management-write.
   const ingress = assertApiRequest(req, 'office-write')
@@ -160,4 +161,13 @@ function notFound(id: string) {
     { error: { code: 'not_found', message: `Công việc "${id}" không có trên bảng`, status: 404 } },
     { status: 404 },
   )
+}
+
+/* Board scope: `?board=<slug>` → every CLI call in the handler gets `--board <slug>`. */
+export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
+  return inRequestBoard(req, () => handleGET(req, ctx))
+}
+
+export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
+  return inRequestBoard(req, () => handlePOST(req, ctx))
 }

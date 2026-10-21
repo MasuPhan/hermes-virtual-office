@@ -3,6 +3,7 @@ import { getTaskDetail, listTasks } from '@/lib/hermes/kanban'
 import { readApprovalPatterns, readApprovalPolicy, readApprovalQueue } from '@/lib/hermes/approvals'
 import { assessHealth } from '@/lib/office/health'
 import { assertApiRequest } from '@/lib/api-policy'
+import { inRequestBoard } from '@/lib/hermes/board-request'
 
 export const dynamic = 'force-dynamic'
 
@@ -17,7 +18,7 @@ export const dynamic = 'force-dynamic'
  * Detail task diambil dengan aturan yang sama dengan `/api/hermes/board`: hanya untuk
  * blocked/running/review, maksimal 40, karena tiap `kanban show` adalah satu proses Python.
  */
-export async function GET(req: Request) {
+async function handleGET(req: Request) {
   const denied = assertApiRequest(req, 'read')
   if (denied) return denied
   try {
@@ -61,4 +62,9 @@ export async function GET(req: Request) {
       { status: 503 },
     )
   }
+}
+
+/* Board scope: `?board=<slug>` → every CLI call in the handler gets `--board <slug>`. */
+export async function GET(req: Request) {
+  return inRequestBoard(req, () => handleGET(req))
 }

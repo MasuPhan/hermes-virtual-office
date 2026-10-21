@@ -1,15 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createTask, listAgents, listAssignees, listTasks } from '@/lib/hermes/kanban'
+import { activeTasksAllBoards, createTask, listAgents, listAssignees, listTasks } from '@/lib/hermes/kanban'
+import { scopedBoard } from '@/lib/hermes/board-scope'
 import { visible } from '@/lib/hermes/office-membership'
 import { blockedAssigneesFor } from '@/lib/hermes/approvals'
 import type { TaskOrigin } from '@/types/hermes'
 import { assertApiRequest } from '@/lib/api-policy'
 import { validateAssigneeName } from '@/lib/hermes/profile-name'
+import { inRequestBoard } from '@/lib/hermes/board-request'
 
 export const dynamic = 'force-dynamic'
 
 /** The board: tasks plus the agents staffing them. */
-export async function GET(req: NextRequest) {
+async function handleGET(req: NextRequest) {
   const denied = assertApiRequest(req, 'read')
   if (denied) return denied
   try {
@@ -25,8 +27,14 @@ export async function GET(req: NextRequest) {
     // tasks stay on the board, so the work is never hidden, only the avatar.
     // Ini yang memberi makan avatar: agent yang task aktifnya menunggu manusia harus tampil
     // 'blocked' DI SINI, bukan hanya di menu spawn.
-    const agents = visible(await listAgents(tasks, assignees, await blockedAssigneesFor(tasks)))
-    return NextResponse.json({ tasks, agents })
+    //
+    // Avatars aggregate busy tasks across ALL boards (Masu's decision, Batch A): a profile
+    // working on another project's board must not look idle because that board is not on
+    // screen. The selected board's rows are reused; other boards cost one memoised `list`.
+    const board = scopedBoard() || ''
+    const busy = await activeTasksAllBoards(tasks, board)
+    const agents = visible(await listAgents(busy, assignees, await blockedAssigneesFor(busy)))
+    return NextResponse.json({ tasks, agents, board: board || null })
   } catch (err) {
     return NextResponse.json(
       { error: { code: 'hermes_unavailable', message: (err as Error).message, status: 503 } },
@@ -50,7 +58,7 @@ export async function GET(req: NextRequest) {
  * `origin` records where the work came from so the board can show it and the source
  * panel can list what it produced. It is written to `created_by` as a marker.
  */
-export async function POST(req: NextRequest) {
+async function handlePOST(req: NextRequest) {
   const denied = assertApiRequest(req, 'management-write')
   if (denied) return denied
   const body = await req.json().catch(() => null)
@@ -164,4 +172,13 @@ async function createMany(raw: unknown[], origin: TaskOrigin) {
     { success: created.length > 0, created, failed, origin },
     { status: created.length ? 201 : 502 },
   )
+}
+
+/* Board scope: `?board=<slug>` → every CLI call in the handler gets `--board <slug>`. */
+export async function GET(req: NextRequest) {
+  return inRequestBoard(req, () => handleGET(req))
+}
+
+export async function POST(req: NextRequest) {
+  return inRequestBoard(req, () => handlePOST(req))
 }

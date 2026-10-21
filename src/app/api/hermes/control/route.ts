@@ -13,6 +13,7 @@ import { advanceTask, pauseAll, resumeAll, steerTask } from '@/lib/hermes/kanban
 import { applyFallback, planFallback } from '@/lib/hermes/fallback'
 import { readProviders } from '@/lib/hermes/providers'
 import { beginAudit, denyAudit, readAudit } from '@/lib/hermes/audit'
+import { inRequestBoard } from '@/lib/hermes/board-request'
 
 export const dynamic = 'force-dynamic'
 
@@ -34,7 +35,7 @@ export const dynamic = 'force-dynamic'
  *   3. Balasannya menyebut APA YANG TERJADI, bukan cuma "ok". Aksi yang tidak bisa dilaporkan
  *      hasilnya akan ditekan lagi oleh operator.
  */
-export async function GET(req: NextRequest) {
+async function handleGET(req: NextRequest) {
   const denied = assertApiRequest(req, 'read')
   if (denied) return denied
   try {
@@ -56,7 +57,7 @@ export async function GET(req: NextRequest) {
 
 const KINDS: ActionKind[] = ['pauseAll', 'resumeAll', 'unblock', 'promote', 'release', 'setFallback']
 
-export async function POST(req: NextRequest) {
+async function handlePOST(req: NextRequest) {
   // Control can pause the whole install, release workers or replace the fallback
   // chain; the whole endpoint is privileged (management write + explicit
   // HVO_ALLOW_PRIVILEGED=1).
@@ -191,4 +192,13 @@ export async function POST(req: NextRequest) {
       { status: 502 },
     )
   }
+}
+
+/* Board scope: `?board=<slug>` → every CLI call in the handler gets `--board <slug>`. */
+export async function GET(req: NextRequest) {
+  return inRequestBoard(req, () => handleGET(req))
+}
+
+export async function POST(req: NextRequest) {
+  return inRequestBoard(req, () => handlePOST(req))
 }

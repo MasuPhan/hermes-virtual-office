@@ -24,6 +24,7 @@ import { readVerification, splitVerificationBatch, type VerificationMark, type V
 import { fleetRootEnv, resolveFleetRoot } from './root'
 import { profileDir, validateAssigneeName, validateProfileName } from './profile-name'
 import { errorTail } from './redact'
+import { envBoard, scopedBoard, validateBoardSlug } from './board-scope'
 
 const run = promisify(execFile)
 
@@ -55,7 +56,8 @@ async function exec(
 }
 
 const HERMES_BIN = process.env.HERMES_BIN || 'hermes'
-const BOARD = process.env.HERMES_KANBAN_BOARD || ''
+/** Office default board (`HERMES_KANBAN_BOARD`); '' = the CLI's current board. Per-request boards come from `withBoardScope`. */
+const BOARD = envBoard()
 const TIMEOUT_MS = Number(process.env.KANBAN_TIMEOUT_MS || 20_000)
 
 /**
@@ -90,8 +92,19 @@ function cleanEnv(): NodeJS.ProcessEnv {
   return env
 }
 
-async function kanban(args: string[], board?: string): Promise<string> {
-  const useBoard = board ?? BOARD
+/**
+ * The board a CLI call runs against: an explicit `board` argument, else the request's
+ * scope (`withBoardScope`), else the office default. `null` = no `--board` at all (only for
+ * board-agnostic verbs such as `boards list`).
+ */
+export function effectiveBoard(board?: string | null): string {
+  if (board === null) return ''
+  const b = board || scopedBoard() || BOARD
+  return b ? validateBoardSlug(b) : ''
+}
+
+async function kanban(args: string[], board?: string | null): Promise<string> {
+  const useBoard = effectiveBoard(board)
   const full = useBoard ? ['kanban', '--board', useBoard, ...args] : ['kanban', ...args]
   const cacheable = READ_VERBS.has(args[0])
   const key = full.join(' ')
@@ -121,7 +134,7 @@ async function kanban(args: string[], board?: string): Promise<string> {
   }
 }
 
-async function kanbanJson<T>(args: string[], board?: string): Promise<T> {
+async function kanbanJson<T>(args: string[], board?: string | null): Promise<T> {
   const out = await kanban([...args, '--json'], board)
   // The CLI prints a single JSON document, but be defensive about leading notices.
   const start = out.search(/[[{]/)
@@ -171,8 +184,9 @@ function iso(ts?: number | null): string | undefined {
   return typeof ts === 'number' && ts > 0 ? new Date(ts * 1000).toISOString() : undefined
 }
 
-function toTask(r: RawTask): Task {
+function toTask(r: RawTask, board?: string): Task {
   return {
+    ...(board ? { board } : {}),
     id: r.id,
     title: r.title,
     body: r.body ?? undefined,
@@ -203,8 +217,9 @@ function toTask(r: RawTask): Task {
  */
 export async function listTasks(opts: { includeArchived?: boolean; board?: string } = {}): Promise<Task[]> {
   const args = opts.includeArchived ? ['list', '--archived'] : ['list']
-  const rows = await kanbanJson<RawTask[]>(args, opts.board)
-  return rows.map(toTask)
+  const board = effectiveBoard(opts.board)
+  const rows = await kanbanJson<RawTask[]>(args, board)
+  return rows.map((r) => toTask(r, board || undefined))
 }
 
 /**
@@ -224,8 +239,8 @@ export type TaskDetail = {
   children: string[]
 }
 
-export async function getTaskDetail(id: string): Promise<TaskDetail | null> {
-  const out = await kanban(['show', id, '--json']).catch(() => '')
+export async function getTaskDetail(id: string, board?: string): Promise<TaskDetail | null> {
+  const out = await kanban(['show', id, '--json'], board).catch(() => '')
   const start = out.search(/[[{]/)
   if (start < 0) return null
   try {
@@ -250,8 +265,9 @@ export async function getTaskDetail(id: string): Promise<TaskDetail | null> {
   }
 }
 
-export async function getTask(id: string): Promise<Task | null> {
-  const out = await kanban(['show', id, '--json']).catch(() => '')
+export async function getTask(id: string, board?: string): Promise<Task | null> {
+  const useBoard = effectiveBoard(board)
+  const out = await kanban(['show', id, '--json'], useBoard).catch(() => '')
   const start = out.search(/[[{]/)
   if (start < 0) return null
   const parsed = JSON.parse(out.slice(start)) as RawTask | { task?: RawTask; parents?: unknown }
@@ -261,7 +277,7 @@ export async function getTask(id: string): Promise<Task | null> {
   const parents = 'parents' in parsed && Array.isArray(parsed.parents)
     ? parsed.parents.filter((p): p is string => typeof p === 'string')
     : []
-  return { ...toTask(raw), parents }
+  return { ...toTask(raw, useBoard || undefined), parents }
 }
 
 export async function createTask(input: NewTaskInput): Promise<Task> {
@@ -319,7 +335,11 @@ export async function readRunningKanbanCards(board?: string): Promise<RunningRea
  */
 export async function tasksForAssignee(name: string): Promise<Task[]> {
   const clean = validateAssigneeName(name)
-  const all = await listTasks({ includeArchived: true })
+  // Every board, not just the one on screen: "does this profile still own work" must not
+  // answer "no" because the work sits on another project's board.
+  const boards = await listBoards().catch(() => null)
+  const slugs = boards?.length ? boards.map((b) => b.slug) : [effectiveBoard()]
+  const all = (await Promise.all(slugs.map((b) => listTasks({ includeArchived: true, board: b || undefined })))).flat()
   return all.filter((t) => t.assignee === clean)
 }
 
@@ -1231,6 +1251,8 @@ export async function listAgents(
       deskIndex: seatOf.get(name) ?? null,
       status,
       currentTaskId: task?.id ?? null,
+      currentTaskBoard: task?.board ?? null,
+      currentTaskTitle: task?.title ?? null,
     }
   })
 }
@@ -1557,4 +1579,113 @@ export async function advanceTask(
 export async function steerTask(taskId: string, instruction: string): Promise<boolean> {
   await kanban(['comment', taskId, instruction])
   return true
+}
+
+/* ----------------------------------------------------------------- boards -- */
+
+/** One board as the office shows it. No `db_path` / workdir: filesystem paths stay server-side. */
+export type BoardInfo = {
+  slug: string
+  name: string
+  icon: string
+  color: string
+  description: string
+  total: number
+  counts: Record<string, number>
+  /** The CLI's own "current" board (what `--board`-less calls hit). */
+  current: boolean
+}
+
+type RawBoard = {
+  slug?: unknown
+  name?: unknown
+  icon?: unknown
+  color?: unknown
+  description?: unknown
+  archived?: unknown
+  is_current?: unknown
+  counts?: unknown
+  total?: unknown
+}
+
+const BOARDS_TTL_MS = 15_000
+let boardsMemo: { at: number; data: BoardInfo[] } | null = null
+
+/** Test-only: forget the memoised board list. */
+export function _resetBoardCachesForTest(): void {
+  boardsMemo = null
+  activeMemo = null
+}
+
+/**
+ * `hermes kanban boards list --json` (read-only), memoised 15 s. Archived boards and rows
+ * with a slug the office would refuse are dropped.
+ */
+export async function listBoards(): Promise<BoardInfo[]> {
+  if (boardsMemo && Date.now() - boardsMemo.at < BOARDS_TTL_MS) return boardsMemo.data
+  const raw = await kanbanJson<RawBoard[]>(['boards', 'list'], null)
+  const data: BoardInfo[] = (Array.isArray(raw) ? raw : [])
+    .filter((b) => b && b.archived !== true && typeof b.slug === 'string' && /^[a-z0-9][a-z0-9_-]{0,63}$/.test(b.slug))
+    .map((b) => {
+      const counts: Record<string, number> = {}
+      if (b.counts && typeof b.counts === 'object') {
+        for (const [k, v] of Object.entries(b.counts as Record<string, unknown>)) {
+          if (typeof v === 'number' && Number.isFinite(v)) counts[k] = v
+        }
+      }
+      return {
+        slug: b.slug as string,
+        name: typeof b.name === 'string' && b.name.trim() ? b.name.trim() : (b.slug as string),
+        icon: typeof b.icon === 'string' ? b.icon.slice(0, 8) : '',
+        color: typeof b.color === 'string' && /^#[0-9a-fA-F]{3,8}$/.test(b.color) ? b.color : '',
+        description: typeof b.description === 'string' ? b.description.slice(0, 300) : '',
+        total: typeof b.total === 'number' ? b.total : Object.values(counts).reduce((a, n) => a + n, 0),
+        counts,
+        current: b.is_current === true,
+      }
+    })
+  boardsMemo = { at: Date.now(), data }
+  return data
+}
+
+/** The slug a board-less request means: `HERMES_KANBAN_BOARD`, else the CLI's current board. */
+export function defaultBoardSlug(boards: BoardInfo[]): string {
+  return BOARD || boards.find((b) => b.current)?.slug || boards[0]?.slug || 'default'
+}
+
+/**
+ * Tasks that make an agent BUSY (running / review), across EVERY board.
+ *
+ * Avatars in the office belong to profiles, and a profile works on whichever board its task
+ * lives on — so "working" must not depend on which board the Kanban happens to show.
+ *
+ * CLI cost: one `list --json` per OTHER board (the selected board's rows are passed in, so
+ * it costs nothing extra), memoised ACTIVE_TTL_MS. With the 4 s poll that is at most one
+ * `list` per extra board every 10 s, plus `boards list` every 15 s. A board that fails to
+ * read is skipped, not fatal: one broken board must not make the whole office look idle.
+ */
+const ACTIVE_TTL_MS = 10_000
+let activeMemo: { at: number; key: string; data: Task[] } | null = null
+
+export async function activeTasksAllBoards(selected: Task[], selectedBoard: string): Promise<Task[]> {
+  const busy = (t: Task) => t.status === 'running' || t.status === 'review'
+  const own = selected.filter(busy)
+  let boards: BoardInfo[]
+  try {
+    boards = await listBoards()
+  } catch {
+    return own
+  }
+  const sel = selectedBoard || defaultBoardSlug(boards)
+  const others = boards.map((b) => b.slug).filter((s) => s !== sel)
+  const key = others.join(',')
+  let rest: Task[]
+  if (activeMemo && activeMemo.key === key && Date.now() - activeMemo.at < ACTIVE_TTL_MS) {
+    rest = activeMemo.data
+  } else {
+    const lists = await Promise.all(others.map((b) => listTasks({ board: b }).catch(() => [] as Task[])))
+    rest = lists.flat().filter(busy)
+    activeMemo = { at: Date.now(), key, data: rest }
+  }
+  return [...own.map((t) => (t.board ? t : { ...t, board: sel })), ...rest]
 }

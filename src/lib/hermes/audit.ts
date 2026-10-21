@@ -17,6 +17,7 @@
 
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
+import { scopedBoard } from './board-scope'
 
 /**
  * Dibaca SETIAP KALI, bukan sekali saat modul di-import.
@@ -36,6 +37,8 @@ export type AuditEntry = {
   /** Agent yang atas namanya aksi diminta; kosong = operator lewat UI. */
   agent?: string
   taskId?: string
+  /** Kanban board the action ran against (from the request scope). */
+  board?: string
   reason?: string
   /** Apa yang dikatakan server akan terjadi. */
   effect: string
@@ -52,6 +55,9 @@ export type AuditEntry = {
  * tidak berguna.
  */
 export function beginAudit(entry: AuditEntry): { finish: (result: string, ok: boolean) => void } {
+  // Every kanban write carries its board: the same task id can exist on two boards.
+  const board = entry.board ?? scopedBoard()
+  if (board) entry = { ...entry, board }
   appendLine({ ...entry, ok: undefined, result: undefined })
   return {
     finish(result: string, ok: boolean) {

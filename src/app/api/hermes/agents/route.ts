@@ -11,6 +11,7 @@ import {
   purgeTasks,
   setProfileModel,
   tasksForAssignee,
+  activeTasksAllBoards,
 } from '@/lib/hermes/kanban'
 import { BUILTIN_HIDDEN, hiddenNames, isHidden, hide, show } from '@/lib/hermes/office-membership'
 import { assertApiRequest } from '@/lib/api-policy'
@@ -67,8 +68,10 @@ export async function GET(req: NextRequest) {
     // Pass the assignees already fetched: listAgents() would spawn the same CLI
     // read a second time.
     // Agent yang task aktifnya menunggu manusia tampil 'blocked', bukan 'working'.
-    const blockedAgentIds = await blockedAssigneesFor(tasks)
-    const agents = await listAgents(tasks, assignees, blockedAgentIds)
+    // Busy state from ALL boards, same as /api/hermes/tasks (avatars must agree).
+    const busy = await activeTasksAllBoards(tasks, '')
+    const blockedAgentIds = await blockedAssigneesFor(busy)
+    const agents = await listAgents(busy, assignees, blockedAgentIds)
     const inOffice = new Set(agents.filter((a) => !isHidden(a.name)).map((a) => a.name))
     // Union of assignees and on-disk profiles: a profile with no tasks is still a
     // profile, and must be listed or creating one looks like it failed.
