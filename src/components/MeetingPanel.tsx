@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { useOffice } from '@/lib/store'
 import Collapsible from './Collapsible'
+import { uiState } from './UiLabels'
 import FullPanel from './FullPanel'
 import ActionItems, { type Candidate } from './ActionItems'
 import { fetchJson } from '@/lib/api'
@@ -115,7 +116,7 @@ export default function MeetingPanel({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ topic, participants: picked, moderator, mode: meetingMode }),
       })
-      if (!res.ok) throw new Error(res.error || 'gagal memulai rapat')
+      if (!res.ok) throw new Error(res.error || 'không bắt đầu được cuộc họp')
       await refresh()
       setTopic('')
       setPicked([])
@@ -138,7 +139,7 @@ export default function MeetingPanel({
         `/api/hermes/meeting?id=${encodeURIComponent(id)}`,
         { cache: 'no-store' },
       )
-      if (!res.ok || !res.data) throw new Error(res.error || 'gagal membuka transkrip')
+      if (!res.ok || !res.data) throw new Error(res.error || 'không mở được bản ghi hội thoại')
       setArchive({ id: res.data.id, body: res.data.body })
     } catch (e) {
       setErr((e as Error).message)
@@ -171,7 +172,7 @@ export default function MeetingPanel({
           body: JSON.stringify({ id: meeting.id }),
         },
       )
-      if (!res.ok) throw new Error(res.error || 'gagal membatalkan rapat')
+      if (!res.ok) throw new Error(res.error || 'không hủy được cuộc họp')
       await refresh()
     } catch (e) {
       setErr((e as Error).message)
@@ -219,12 +220,12 @@ export default function MeetingPanel({
   return (
     <FullPanel
       onClose={onClose}
-      label="Ruang rapat"
-      title={screen === 'new' ? 'Rapat baru' : 'Ruang rapat'}
+      label="Phòng họp"
+      title={screen === 'new' ? 'Cuộc họp mới' : 'Phòng họp'}
       actions={
         screen === 'new' && (
           <button className="vp-chip-btn" onClick={() => setScreen('list')}>
-            ← Kembali
+            ← Quay lại
           </button>
         )
       }
@@ -237,16 +238,16 @@ export default function MeetingPanel({
           /* ------------------------------------------------ opened card ---- */
           <>
             <button className="vp-chip-btn" onClick={closeCard}>
-              ← Daftar rapat
+              ← Danh sách cuộc họp
             </button>
 
             {opened.kind === 'archive' ? (
               archBusy || !archive ? (
-                <div className="vp-muted">memuat transkrip…</div>
+                <div className="vp-muted">đang tải bản ghi hội thoại…</div>
               ) : (
                 <>
                   <Collapsible
-                    label={`Transkrip · ${archive.id}`}
+                    label={`Bản ghi hội thoại · ${archive.id}`}
                     text={archive.body}
                     defaultOpen
                   />
@@ -254,50 +255,50 @@ export default function MeetingPanel({
                     className="vp-btn vp-btn-ghost"
                     onClick={() => download(`rapat-${archive.id}.md`, archive.body)}
                   >
-                    Unduh
+                    Tải xuống
                   </button>
 
                   {itemsBusy ? (
-                    <div className="vp-muted">membaca tindak lanjut…</div>
+                    <div className="vp-muted">đang đọc việc cần theo dõi…</div>
                   ) : (
                     <ActionItems
                       candidates={items}
                       roster={roster}
                       origin={{ kind: 'meeting', ref: archive.id }}
-                      label="TINDAK LANJUT → TUGAS"
+                      label="VIỆC THEO DÕI → CÔNG VIỆC"
                     />
                   )}
                 </>
               )
             ) : !meeting ? (
-              <div className="vp-muted">rapat ini sudah tidak ada di memori</div>
+              <div className="vp-muted">cuộc họp này không còn trong bộ nhớ</div>
             ) : (
               <>
                 <div className="vp-kv">
-                  <span>topik</span>
-                  <b>{meeting.topic || '(tanpa topik)'}</b>
+                  <span>chủ đề</span>
+                  <b>{meeting.topic || '(chưa có chủ đề)'}</b>
                 </div>
                 <div className="vp-kv">
-                  <span>status</span>
+                  <span>trạng thái</span>
                   <b>
-                    {meeting.state} · {meeting.phase}
+                    {uiState(meeting.state)} · {uiState(meeting.phase)}
                     {live && <span className="vp-live"> ●</span>}
                   </b>
                 </div>
                 <div className="vp-kv">
-                  <span>mode</span>
+                  <span>chế độ</span>
                   <b>
                     {meeting.mode === 'a2a'
-                      ? 'A2A — pernyataan dari agent nyata via A2A'
-                      : 'simulasi — yang bicara LLM gateway, BUKAN agent'}
+                      ? 'A2A — phát biểu của tác tử thực qua A2A'
+                      : 'mô phỏng — LLM của gateway phát biểu, KHÔNG PHẢI tác tử'}
                   </b>
                 </div>
                 <div className="vp-kv">
-                  <span>peserta</span>
+                  <span>người tham gia</span>
                   <b>{meeting.participants.join(', ') || '—'}</b>
                 </div>
                 <div className="vp-kv">
-                  <span>giliran</span>
+                  <span>lượt phát biểu</span>
                   <b>{meeting.currentSpeaker || '—'}</b>
                 </div>
 
@@ -307,15 +308,15 @@ export default function MeetingPanel({
                     disabled={cancelBusy}
                     onClick={cancel}
                   >
-                    {cancelBusy ? 'Membatalkan…' : 'Batalkan rapat'}
+                    {cancelBusy ? 'Đang hủy…' : 'Hủy cuộc họp'}
                   </button>
                 )}
 
                 <Collapsible
-                  label="Transkrip"
+                  label="Bản ghi hội thoại"
                   count={meeting.turns.length}
                   defaultOpen={!!live}
-                  empty="belum ada giliran"
+                  empty="chưa có lượt phát biểu"
                 >
                   <div className="flex flex-col gap-2">
                     {meeting.turns.map((t, i) => (
@@ -328,8 +329,8 @@ export default function MeetingPanel({
                         <div className="vp-turn-who">
                           {t.speaker}
                           <i>
-                            {t.kind}
-                            {t.round ? ` · r${t.round}` : ''}
+                            {uiState(t.kind)}
+                            {t.round ? ` · vòng ${t.round}` : ''}
                           </i>
                         </div>
                         <div className="vp-turn-body">{t.text}</div>
@@ -340,23 +341,23 @@ export default function MeetingPanel({
 
                 {meeting.minutes && (
                   <>
-                    <Collapsible label="Notulen" text={meeting.minutes} defaultOpen />
+                    <Collapsible label="Biên bản" text={meeting.minutes} defaultOpen />
                     <button
                       className="vp-btn vp-btn-ghost"
                       onClick={() => download(`notulen-${meeting.id}.md`, meeting.minutes)}
                     >
-                      Unduh notulen
+                      Tải biên bản
                     </button>
 
                     {/* The cross-menu link: what this meeting asked for, as tasks. */}
                     {itemsBusy ? (
-                      <div className="vp-muted">membaca tindak lanjut…</div>
+                      <div className="vp-muted">đang đọc việc cần theo dõi…</div>
                     ) : (
                       <ActionItems
                         candidates={items}
                         roster={roster}
                         origin={{ kind: 'meeting', ref: meeting.id }}
-                        label="TINDAK LANJUT → TUGAS"
+                        label="VIỆC THEO DÕI → CÔNG VIỆC"
                       />
                     )}
                   </>
@@ -368,12 +369,12 @@ export default function MeetingPanel({
           /* ------------------------------------------------ the list ------ */
           <>
             <button className="vp-btn" onClick={() => setScreen('new')}>
-              + Buat rapat baru
+              + Tạo cuộc họp mới
             </button>
             {!configured && (
               <div className="vp-note">
-                LLM belum dikonfigurasi — rapat tidak bisa dimulai. Isi{' '}
-                <code>AI_BASE_URL</code> dan <code>AI_API_KEY</code> di{' '}
+                Chưa cấu hình LLM — chưa thể bắt đầu họp. Điền{' '}
+                <code>AI_BASE_URL</code> và <code>AI_API_KEY</code> trong{' '}
                 <code>.env.local</code>.
               </div>
             )}
@@ -381,30 +382,30 @@ export default function MeetingPanel({
             {meeting && (
               <>
                 <div className="vp-sub">
-                  RAPAT AKTIF {live && <span className="vp-live">●</span>}
+                  CUỘC HỌP HIỆN TẠI {live && <span className="vp-live">●</span>}
                 </div>
                 <Card
-                  title={meeting.topic || '(tanpa topik)'}
-                  meta={`${meeting.state} · ${meeting.participants.length} peserta · ${meeting.turns.length} giliran`}
+                  title={meeting.topic || '(chưa có chủ đề)'}
+                  meta={`${uiState(meeting.state)} · ${meeting.participants.length} người tham gia · ${meeting.turns.length} lượt phát biểu`}
                   highlight={!!live}
                   onClick={() => setOpened({ kind: 'live', id: meeting.id })}
                 />
               </>
             )}
 
-            <div className="vp-sub">RAPAT TERDAHULU ({history.length})</div>
+            <div className="vp-sub">CUỘC HỌP TRƯỚC ({history.length})</div>
             <div className="flex flex-col gap-2">
               {history.map((h) => (
                 <Card
                   key={h.id}
                   title={h.topic}
-                  meta={`${h.startedAt} · ${h.participants.length || '?'} peserta · ${h.turnCount} giliran`}
+                  meta={`${new Date(h.startedAt).toLocaleDateString('vi-VN')} · ${h.participants.length || '?'} người tham gia · ${h.turnCount} lượt phát biểu`}
                   disabled={archBusy}
                   onClick={() => openArchive(h.id)}
                 />
               ))}
               {!history.length && (
-                <span className="vp-muted">belum ada rapat tersimpan</span>
+                <span className="vp-muted">chưa có cuộc họp được lưu</span>
               )}
             </div>
           </>
@@ -412,16 +413,16 @@ export default function MeetingPanel({
       ) : (
         /* ---------------------------------------------------- create form -- */
         <>
-          <label className="vp-sub">TOPIK</label>
+          <label className="vp-sub">CHỦ ĐỀ</label>
           <textarea
             className="vp-input"
             rows={2}
             value={topic}
             onChange={(e) => setTopic(e.target.value)}
-            placeholder="Rencana rilis endpoint refund"
+            placeholder="Kế hoạch phát hành API hoàn tiền"
           />
 
-          <label className="vp-sub">PESERTA (2–4) · {agents.length} agent aktif</label>
+          <label className="vp-sub">NGƯỜI THAM GIA (2–4) · {agents.length} tác tử đang hoạt động</label>
           <div className="flex flex-wrap gap-2">
             {agents.map((a) => (
               <button
@@ -430,13 +431,13 @@ export default function MeetingPanel({
                 onClick={() => toggle(a.name)}
               >
                 {a.displayName}
-                <i className="vp-chip-role">{a.status}</i>
+                <i className="vp-chip-role">{uiState(a.status)}</i>
               </button>
             ))}
-            {!agents.length && <span className="vp-muted">belum ada agent aktif</span>}
+            {!agents.length && <span className="vp-muted">chưa có tác tử đang hoạt động</span>}
           </div>
 
-          <label className="vp-sub">PEMBAWA ACARA</label>
+          <label className="vp-sub">NGƯỜI ĐIỀU PHỐI</label>
           <select
             className="vp-input"
             value={moderator}
@@ -449,7 +450,7 @@ export default function MeetingPanel({
             ))}
           </select>
 
-          <label className="vp-sub">MODE RAPAT</label>
+          <label className="vp-sub">CHẾ ĐỘ HỌP</label>
           <div className="flex flex-col gap-2">
             <label className="vp-kv">
               <input
@@ -459,8 +460,8 @@ export default function MeetingPanel({
                 onChange={() => setMeetingMode('simulasi')}
               />
               <span>
-                <b>Simulasi</b> — yang bicara LLM gateway, <b>bukan</b> agent. Perilaku lama,
-                labelnya jujur.
+                <b>Mô phỏng</b> — LLM của gateway phát biểu, <b>không phải</b> tác tử. Cách hoạt động cũ,
+                được ghi rõ để tránh nhầm lẫn.
               </span>
             </label>
             <label className="vp-kv">
@@ -471,8 +472,8 @@ export default function MeetingPanel({
                 onChange={() => setMeetingMode('a2a')}
               />
               <span>
-                <b>A2A</b> — yang bicara agent nyata via protokol A2A (butuh toggle A2A tiap
-                peserta + restart gateway setelah perubahan).
+                <b>A2A</b> — tác tử thực phát biểu qua giao thức A2A (cần bật A2A cho từng
+                người tham gia + khởi động lại gateway sau khi thay đổi).
               </span>
             </label>
           </div>
@@ -482,9 +483,9 @@ export default function MeetingPanel({
             disabled={busy || !topic.trim() || picked.length < 2 || !configured}
             onClick={start}
           >
-            {busy ? 'Memulai…' : 'Mulai rapat'}
+            {busy ? 'Đang bắt đầu…' : 'Bắt đầu họp'}
           </button>
-          {picked.length < 2 && <div className="vp-muted">pilih minimal 2 peserta</div>}
+          {picked.length < 2 && <div className="vp-muted">chọn ít nhất 2 người tham gia</div>}
         </>
       )}
     </FullPanel>

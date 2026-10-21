@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { useOffice } from '@/lib/store'
 import Collapsible from './Collapsible'
+import { UI_ROLE_LABEL, uiState } from './UiLabels'
 import ModelPicker, { type ModelChoice } from './ModelPicker'
 import type { Task } from '@/types/hermes'
 import { fetchJson } from '@/lib/api'
@@ -34,10 +35,10 @@ type Evidence = {
 
 function age(sec: number | null): string {
   if (sec == null || sec < 0) return '—'
-  if (sec < 60) return `${sec} dtk`
-  if (sec < 3600) return `${Math.floor(sec / 60)} mnt`
-  if (sec < 86400) return `${Math.floor(sec / 3600)} jam`
-  return `${Math.floor(sec / 86400)} hari`
+  if (sec < 60) return `${sec} giây`
+  if (sec < 3600) return `${Math.floor(sec / 60)} phút`
+  if (sec < 86400) return `${Math.floor(sec / 3600)} giờ`
+  return `${Math.floor(sec / 86400)} ngày`
 }
 
 /**
@@ -52,26 +53,26 @@ function originLabel(o?: { kind: string; ref?: string }): string | null {
   if (!o) return null
   switch (o.kind) {
     case 'meeting':
-      return o.ref ? `rapat ${o.ref}` : 'rapat'
+      return o.ref ? `cuộc họp ${o.ref}` : 'cuộc họp'
     case 'cron':
-      return o.ref ? `cron ${o.ref}` : 'cron'
+      return o.ref ? `lịch định kỳ ${o.ref}` : 'lịch định kỳ'
     case 'agent':
-      return o.ref ? `agent ${o.ref}` : 'agent'
+      return o.ref ? `tác tử ${o.ref}` : 'tác tử'
     default:
       return null
   }
 }
 
 const STATUS_LABEL: Record<string, string> = {
-  todo: 'Belum dikerjakan',
-  triage: 'Perlu dispesifikasi',
-  ready: 'Siap diambil worker',
-  scheduled: 'Terjadwal',
-  running: 'Sedang dikerjakan',
-  review: 'Menunggu review',
-  blocked: 'Terhambat',
-  done: 'Selesai (klaim worker)',
-  archived: 'Diarsipkan',
+  todo: 'Chưa thực hiện',
+  triage: 'Cần làm rõ yêu cầu',
+  ready: 'Sẵn sàng để tiến trình nhận',
+  scheduled: 'Đã lên lịch',
+  running: 'Đang thực hiện',
+  review: 'Chờ đánh giá',
+  blocked: 'Bị chặn',
+  done: 'Hoàn tất (theo báo cáo của tiến trình)',
+  archived: 'Đã lưu trữ',
 }
 
 /**
@@ -119,7 +120,7 @@ export default function TaskPanel() {
       .then((res) => {
         if (!alive) return
         if (!res.ok) {
-          setErr(res.error || 'gagal memuat detail tugas')
+          setErr(res.error || 'không tải được chi tiết công việc')
           return
         }
         setRuns(res.data?.runs || [])
@@ -144,7 +145,7 @@ export default function TaskPanel() {
       .then((res) => {
         if (!alive) return
         if (!res.ok || !res.data || !Array.isArray(res.data.items)) {
-          setEvErr(res.error || 'gagal membaca bukti')
+          setEvErr(res.error || 'không đọc được bằng chứng')
           return
         }
         setEvidence(res.data)
@@ -168,7 +169,7 @@ export default function TaskPanel() {
       .then((res) => {
         if (!alive) return
         if (!res.ok || !res.data || typeof res.data.verdict !== 'string') {
-          setVfErr(res.error || 'gagal membaca verifikasi')
+          setVfErr(res.error || 'không đọc được kết quả xác minh')
           return
         }
         setVerify(res.data)
@@ -213,8 +214,8 @@ export default function TaskPanel() {
           body: JSON.stringify({ action, ...extra }),
         },
       )
-      if (!res.ok) throw new Error(res.error || 'aksi gagal')
-      setNote(res.data?.note || (action === 'set-model' ? 'Model disimpan.' : 'Selesai.'))
+      if (!res.ok) throw new Error(res.error || 'thao tác thất bại')
+      setNote(res.data?.note || (action === 'set-model' ? 'Đã lưu mô hình.' : 'Hoàn tất.'))
       await load()
       const fresh = await fetchJson<{ runs?: RunInfo[]; log?: string; task?: Task }>(
         `/api/hermes/tasks/${taskId}`,
@@ -227,7 +228,7 @@ export default function TaskPanel() {
       }
       setEvNonce((n) => n + 1)
     } catch (e) {
-      setNote(`Gagal: ${(e as Error).message}`)
+      setNote(`Thất bại: ${(e as Error).message}`)
     } finally {
       setBusy(false)
     }
@@ -238,46 +239,46 @@ export default function TaskPanel() {
   return (
     <aside className="vp-panel left-0">
       <header className="vp-panel-head">
-        <h2>Detail tugas</h2>
-        <button className="vp-x" onClick={() => openTask(null)} aria-label="Tutup">
+        <h2>Chi tiết công việc</h2>
+        <button className="vp-x" onClick={() => openTask(null)} aria-label="Đóng">
           ×
         </button>
       </header>
 
       <div className="vp-pad flex flex-col gap-3">
-        {!task && <div className="vp-muted">Tugas {taskId} tidak ada di board aktif.</div>}
+        {!task && <div className="vp-muted">Công việc {taskId} không có trên bảng hiện tại.</div>}
 
         {task && (
           <>
             <div className="vp-kv">
-              <span>judul</span>
+              <span>tiêu đề</span>
               <b>{task.title}</b>
             </div>
             <div className="vp-kv">
-              <span>status</span>
+              <span>trạng thái</span>
               <b>{STATUS_LABEL[task.status] || task.status}</b>
             </div>
             <div className="vp-kv">
-              <span>penanggung</span>
-              <b>{task.assignee || '—'}{agent ? ` (${agent.role})` : ''}</b>
+              <span>người phụ trách</span>
+              <b>{task.assignee || '—'}{agent ? ` (${UI_ROLE_LABEL[agent.role] ?? agent.role})` : ''}</b>
             </div>
             <div className="vp-kv">
-              <span>prioritas</span>
+              <span>độ ưu tiên</span>
               <b>{task.priority}</b>
             </div>
             <div className="vp-kv">
-              <span>model worker</span>
-              <b>{task.model || 'bawaan profil'}</b>
+              <span>mô hình của tiến trình</span>
+              <b>{task.model || 'mặc định của hồ sơ'}</b>
             </div>
             {task.updatedAt && (
               <div className="vp-kv">
-                <span>diubah</span>
-                <b>{new Date(task.updatedAt).toLocaleString('id-ID')}</b>
+                <span>cập nhật</span>
+                <b>{new Date(task.updatedAt).toLocaleString('vi-VN')}</b>
               </div>
             )}
             {originLabel(task.origin) && (
               <div className="vp-kv">
-                <span>asal</span>
+                <span>nguồn</span>
                 <b>{originLabel(task.origin)}</b>
               </div>
             )}
@@ -288,7 +289,7 @@ export default function TaskPanel() {
                 "menunggu prasyarat" without the ids is unactionable. */}
             {!!task.parents?.length && (
               <>
-                <div className="vp-sub">PRASYARAT ({task.parents.length})</div>
+                <div className="vp-sub">ĐIỀU KIỆN TIÊN QUYẾT ({task.parents.length})</div>
                 <div className="flex flex-col gap-1">
                   {task.parents.map((id) => {
                     const parent = tasks.find((t) => t.id === id)
@@ -299,17 +300,17 @@ export default function TaskPanel() {
                         key={id}
                         className="vp-run text-left"
                         onClick={() => openTask(id)}
-                        title="Buka tugas ini"
+                        title="Mở công việc này"
                       >
-                        <b className={clear ? '' : 'vp-warn'}>{clear ? 'selesai' : STATUS_LABEL[state || ''] || state || 'tidak ada di board'}</b>
+                        <b className={clear ? '' : 'vp-warn'}>{clear ? 'hoàn tất' : STATUS_LABEL[state || ''] || state || 'không có trên bảng'}</b>
                         <span className="vp-muted"> · {parent?.title || id}</span>
                       </button>
                     )
                   })}
                 </div>
                 <div className="vp-muted">
-                  Tugas ini baru boleh jalan setelah semua prasyarat di atas selesai. Tombol
-                  Jalankan pada tugas ini tidak akan men-spawn worker selama masih ada yang belum selesai.
+                  Công việc chỉ được chạy khi mọi điều kiện trên đã hoàn tất. Nút
+                  Chạy sẽ không khởi tạo tiến trình nếu còn điều kiện chưa hoàn tất.
                 </div>
               </>
             )}
@@ -318,31 +319,31 @@ export default function TaskPanel() {
                 workers lives in the gateway. Without this button a task just sits
                 there whenever the gateway is down. It lifts a parked task first,
                 so one click covers blocked/scheduled too. */}
-            <div className="vp-sub">JALANKAN</div>
+            <div className="vp-sub">CHẠY</div>
             <div className="flex gap-2">
               <button
                 className="vp-btn"
                 disabled={busy || task.status === 'running' || task.status === 'review'}
                 onClick={() => act('run')}
-                title="Buka blokir bila perlu, lalu suruh dispatcher Hermes mengeksekusi tugas ini"
+                title="Gỡ chặn nếu cần, sau đó yêu cầu bộ điều phối Hermes chạy công việc này"
               >
-                {busy ? '…' : 'Jalankan'}
+                {busy ? '…' : 'Chạy'}
               </button>
             </div>
             {blocked && (
               <div className="vp-muted">
-                Status <b>{task.status}</b>: tombol Jalankan otomatis membuka blokir dulu.
+                Trạng thái <b>{uiState(task.status)}</b>: nút Chạy sẽ tự gỡ chặn trước.
               </div>
             )}
 
-            <div className="vp-sub">MODEL AGENT UNTUK TUGAS INI</div>
+            <div className="vp-sub">MÔ HÌNH TÁC TỬ CHO VIỆC NÀY</div>
             <ModelPicker
               value={pick}
               onChange={setPick}
               models={models}
-              emptyLabel={`bawaan profil${agent ? ` (${agent.name})` : ''}`}
+              emptyLabel={`mặc định của hồ sơ${agent ? ` (${agent.name})` : ''}`}
               disabled={busy}
-              title="Berlaku pada spawn worker berikutnya"
+              title="Áp dụng cho lần khởi tạo tiến trình tiếp theo"
             />
             <div className="flex gap-2">
               <button
@@ -352,88 +353,88 @@ export default function TaskPanel() {
                   const hit = models.find((m) => m.model === pick)
                   void act('set-model', pick ? { model: pick, provider: hit?.provider } : { model: null })
                 }}
-                title="Berlaku pada spawn worker berikutnya"
+                title="Áp dụng cho lần khởi tạo tiến trình tiếp theo"
               >
-                Simpan model
+                Lưu mô hình
               </button>
             </div>
             {note && <div className="vp-note">{note}</div>}
 
-            {task.body && <Collapsible label="Uraian" text={task.body} />}
+            {task.body && <Collapsible label="Mô tả" text={task.body} />}
 
             {/* Klaim worker ≠ terverifikasi. "Selesai" hanya berarti worker MENYATAKAN
                 selesai; terverifikasi berarti ada jejak review_requested → completed dari
                 tangan kedua yang independen. Basi/gagal dibaca = dikatakan apa adanya. */}
-            <div className="vp-sub">VERIFIKASI</div>
-            {vfBusy && <div className="vp-muted">membaca verifikasi…</div>}
-            {vfErr && <div className="vp-err">gagal membaca verifikasi: {vfErr}</div>}
+            <div className="vp-sub">XÁC MINH</div>
+            {vfBusy && <div className="vp-muted">đang đọc kết quả xác minh…</div>}
+            {vfErr && <div className="vp-err">không đọc được kết quả xác minh: {vfErr}</div>}
             {verify && (
               <>
                 <div className="vp-kv">
-                  <span>status</span>
+                  <span>trạng thái</span>
                   {verify.verdict === 'verified' ? (
                     <b>
-                      <span className="vp-chip">terverifikasi</span>
-                      {verify.reviewer && <span className="vp-muted"> · oleh {verify.reviewer}</span>}
+                      <span className="vp-chip">đã xác minh</span>
+                      {verify.reviewer && <span className="vp-muted"> · bởi {verify.reviewer}</span>}
                     </b>
                   ) : verify.verdict === 'claim' ? (
                     <b>
-                      <span className="vp-chip vp-chip-warn">klaim</span>
-                      <span className="vp-muted"> · belum lewat review</span>
+                      <span className="vp-chip vp-chip-warn">tự báo cáo</span>
+                      <span className="vp-muted"> · chưa qua đánh giá</span>
                     </b>
                   ) : task?.status === 'review' ? (
-                    <b className="vp-muted">menunggu review{verify.reviewer ? ` oleh ${verify.reviewer}` : ''}</b>
+                    <b className="vp-muted">chờ đánh giá{verify.reviewer ? ` bởi ${verify.reviewer}` : ''}</b>
                   ) : (
-                    <b className="vp-muted">belum selesai — belum dinilai</b>
+                    <b className="vp-muted">chưa hoàn tất — chưa đánh giá</b>
                   )}
                 </div>
                 {verify.verdict === 'claim' && <div className="vp-warn">{verify.why}</div>}
                 {verify.verdict === 'verified' && verify.verifiedAt != null && (
                   <div className="vp-muted">
-                    disahkan {new Date(verify.verifiedAt * 1000).toLocaleString('id-ID')}
-                    {verify.implementer ? ` · dikerjakan ${verify.implementer}` : ''}
+                    đã xác nhận {new Date(verify.verifiedAt * 1000).toLocaleString('vi-VN')}
+                    {verify.implementer ? ` · thực hiện bởi ${verify.implementer}` : ''}
                   </div>
                 )}
                 {verify.verdict === 'open' && verify.requestedAt != null && (
                   <div className="vp-muted">
-                    diserahkan {new Date(verify.requestedAt * 1000).toLocaleString('id-ID')}
-                    {verify.implementer ? ` oleh ${verify.implementer}` : ''}
+                    đã gửi đánh giá {new Date(verify.requestedAt * 1000).toLocaleString('vi-VN')}
+                    {verify.implementer ? ` bởi ${verify.implementer}` : ''}
                   </div>
                 )}
                 <div className="vp-muted">
-                  dibaca {age(Math.max(0, Math.round((Date.now() - Date.parse(verify.readAt)) / 1000)))} lalu
+                  đã đọc {age(Math.max(0, Math.round((Date.now() - Date.parse(verify.readAt)) / 1000)))} trước
                 </div>
               </>
             )}
 
             {/* "Selesai" hanya klaim worker. Yang bisa diperiksa: ringkasan, run (outcome +
                 metadata), lampiran, log. Done tanpa satu pun = TANPA BUKTI, tidak pernah hijau. */}
-            <div className="vp-sub">BUKTI HASIL</div>
-            {evBusy && <div className="vp-muted">membaca bukti…</div>}
-            {evErr && <div className="vp-err">gagal membaca bukti: {evErr}</div>}
+            <div className="vp-sub">BẰNG CHỨNG KẾT QUẢ</div>
+            {evBusy && <div className="vp-muted">đang đọc bằng chứng…</div>}
+            {evErr && <div className="vp-err">không đọc được bằng chứng: {evErr}</div>}
             {evidence && (
               <>
                 <div className="vp-kv">
-                  <span>penilaian</span>
+                  <span>đánh giá</span>
                   {evidence.verdict === 'proven' ? (
                     <b>
-                      <span className="vp-chip">terbukti</span>
+                      <span className="vp-chip">có bằng chứng</span>
                       {evidence.completedAgeSeconds != null && (
-                        <span className="vp-muted"> · selesai {age(evidence.completedAgeSeconds)} lalu</span>
+                        <span className="vp-muted"> · hoàn tất {age(evidence.completedAgeSeconds)} trước</span>
                       )}
                     </b>
                   ) : evidence.verdict === 'unproven' ? (
                     <b>
-                      <span className="vp-chip vp-chip-warn">TANPA BUKTI</span>
+                      <span className="vp-chip vp-chip-warn">CHƯA CÓ BẰNG CHỨNG</span>
                     </b>
                   ) : (
-                    <b className="vp-muted">belum selesai — belum dinilai</b>
+                    <b className="vp-muted">chưa hoàn tất — chưa đánh giá</b>
                   )}
                 </div>
                 {evidence.verdict === 'unproven' && (
                   <div className="vp-warn">
-                    Ditandai selesai, tapi tidak ada ringkasan, run bermetadata, log, maupun lampiran
-                    yang bisa diperiksa.
+                    Được đánh dấu hoàn tất nhưng không có bản tóm tắt, lần chạy có siêu dữ liệu, nhật ký hay tệp đính kèm
+                    để kiểm tra.
                   </div>
                 )}
                 <div className="flex flex-col gap-2">
@@ -444,28 +445,28 @@ export default function TaskPanel() {
                     ))}
                   {evidence.items.some((it) => it.kind === 'attachment') && (
                     <div className="vp-run">
-                      <b>lampiran</b>
+                      <b>tệp đính kèm</b>
                       {evidence.items
                         .filter((it) => it.kind === 'attachment')
                         .map((it, i) => (
                           <div key={i} className="vp-muted">{it.label}</div>
                         ))}
-                      <div className="vp-muted">CLI hanya mendaftar lampiran; isinya tidak bisa dibuka dari sini.</div>
+                      <div className="vp-muted">CLI chỉ liệt kê tệp đính kèm; không thể mở nội dung tại đây.</div>
                     </div>
                   )}
                   {evidence.items.some((it) => it.kind === 'log') && (
-                    <div className="vp-muted">log worker tersedia — lihat “Log worker” di bawah.</div>
+                    <div className="vp-muted">có nhật ký tiến trình — xem “Nhật ký tiến trình” bên dưới.</div>
                   )}
-                  {!evidence.items.length && <div className="vp-muted">tidak ada bukti dari keempat sumber</div>}
+                  {!evidence.items.length && <div className="vp-muted">không có bằng chứng từ cả bốn nguồn</div>}
                 </div>
                 <div className="vp-muted">
-                  dibaca {age(Math.max(0, Math.round((Date.now() - Date.parse(evidence.readAt)) / 1000)))} lalu
+                  đã đọc {age(Math.max(0, Math.round((Date.now() - Date.parse(evidence.readAt)) / 1000)))} trước
                 </div>
               </>
             )}
 
-            <div className="vp-sub">RIWAYAT RUN ({runs.length})</div>
-            {loading && <div className="vp-muted">memuat…</div>}
+            <div className="vp-sub">LỊCH SỬ CHẠY ({runs.length})</div>
+            {loading && <div className="vp-muted">đang tải…</div>}
             {err && <div className="vp-err">{err}</div>}
             <div className="flex flex-col gap-2">
               {runs
@@ -473,21 +474,21 @@ export default function TaskPanel() {
                 .reverse()
                 .map((r) => (
                   <div key={r.id} className="vp-run">
-                    <b>{r.status}</b>
-                    {r.outcome ? <span> · {r.outcome}</span> : null}
+                    <b>{uiState(r.status)}</b>
+                    {r.outcome ? <span> · {uiState(r.outcome)}</span> : null}
                     {r.profile ? <span className="vp-muted"> · {r.profile}</span> : null}
                     {r.summary && <div className="vp-muted">{r.summary}</div>}
                     {r.error && <div className="vp-err">{r.error}</div>}
                   </div>
                 ))}
-              {!loading && !runs.length && <div className="vp-muted">belum ada run</div>}
+              {!loading && !runs.length && <div className="vp-muted">chưa có lần chạy nào</div>}
             </div>
 
             <Collapsible
-              label="Log worker"
+              label="Nhật ký tiến trình"
               text={log}
               count={log.trim() ? log.trim().split('\n').length : undefined}
-              empty="belum ada log"
+              empty="chưa có nhật ký"
             />
           </>
         )}

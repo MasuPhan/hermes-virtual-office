@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import { UI_ORIGIN_LABEL, uiState } from './UiLabels'
 import { useOffice } from '@/lib/store'
 import { EVIDENCE_MARK_LABEL, STALE_EVIDENCE, markClass, markOf, useEvidenceMarks } from './useEvidenceMarks'
 import {
@@ -19,12 +20,12 @@ import {
  */
 
 export const KANBAN_COLUMNS = [
-  { label: 'TODO', statuses: ['todo', 'triage', 'ready', 'scheduled'] },
-  { label: 'DIKERJAKAN', statuses: ['running'] },
-  { label: 'REVIEW', statuses: ['review'] },
-  { label: 'SELESAI', statuses: ['done'] },
-  { label: 'TERHAMBAT', statuses: ['blocked'] },
-  { label: 'ARSIP', statuses: ['archived'] },
+  { label: 'CẦN LÀM', statuses: ['todo', 'triage', 'ready', 'scheduled'] },
+  { label: 'ĐANG LÀM', statuses: ['running'] },
+  { label: 'CHỜ DUYỆT', statuses: ['review'] },
+  { label: 'HOÀN TẤT', statuses: ['done'] },
+  { label: 'BỊ CHẶN', statuses: ['blocked'] },
+  { label: 'LƯU TRỮ', statuses: ['archived'] },
 ]
 const KNOWN = KANBAN_COLUMNS.flatMap((column) => column.statuses)
 
@@ -69,7 +70,7 @@ export default function KanbanColumns({
         {columns.map((column) => (
           <section key={column.label} className="vp-col">
             <header className="vp-col-head">
-              <span>{column.label}</span>
+              <span>{column.label === 'STATUS LAIN' ? 'TRẠNG THÁI KHÁC' : column.label}</span>
               <span className="vp-count">{column.items.length}</span>
             </header>
             <div className="flex flex-col gap-2">
@@ -87,9 +88,9 @@ export default function KanbanColumns({
                 >
                   <div className="vp-card-title">{task.title}</div>
                   <div className="vp-card-meta">
-                    <span className="vp-chip">{column.label === 'STATUS LAIN' ? task.status : task.assignee || '—'}</span>
+                    <span className="vp-chip">{column.label === 'STATUS LAIN' ? uiState(task.status) : task.assignee || '—'}</span>
                     {task.origin && task.origin.kind !== 'manual' && (
-                      <span className={`vp-chip vp-chip-${task.origin.kind}`}>{task.origin.kind}</span>
+                      <span className={`vp-chip vp-chip-${task.origin.kind}`}>{UI_ORIGIN_LABEL[task.origin.kind] ?? task.origin.kind}</span>
                     )}
                     <code>{task.id}</code>
                     {mark && <span className={markClass(mark)}>{EVIDENCE_MARK_LABEL[mark]}</span>}
@@ -100,7 +101,7 @@ export default function KanbanColumns({
                 </article>
                 )
               })}
-              {!column.items.length && <div className="vp-empty">kosong</div>}
+              {!column.items.length && <div className="vp-empty">trống</div>}
             </div>
           </section>
         ))}
@@ -133,25 +134,25 @@ function KanbanToolbar({
         <div>
           <p className="vp-sub">
             {marks.error ? (
-              <span className="vp-err">gagal membaca bukti: {marks.error}</span>
+              <span className="vp-err">không đọc được bằng chứng: {marks.error}</span>
             ) : marksAge == null ? (
-              marks.busy ? 'membaca bukti…' : 'bukti belum dibaca'
+              marks.busy ? 'đang đọc bằng chứng…' : 'chưa đọc bằng chứng'
             ) : (
               <>
-                bukti ringkas (ringkasan + run, tanpa log/lampiran) · dibaca {marksAge} dtk lalu
-                {marksAge > STALE_EVIDENCE && <span className="vp-warn"> · BASI</span>}
+                bằng chứng tóm tắt (tóm tắt + lần chạy, không gồm nhật ký/tệp đính kèm) · đã đọc {marksAge} giây trước
+                {marksAge > STALE_EVIDENCE && <span className="vp-warn"> · ĐÃ CŨ</span>}
               </>
             )}
           </p>
           <p className="vp-sub">
             {vf.error ? (
-              <span className="vp-err">gagal membaca verifikasi: {vf.error}</span>
+              <span className="vp-err">không đọc được kết quả xác minh: {vf.error}</span>
             ) : vfAge == null ? (
-              vf.busy ? 'membaca verifikasi…' : 'verifikasi belum dibaca'
+              vf.busy ? 'đang đọc kết quả xác minh…' : 'chưa đọc kết quả xác minh'
             ) : (
               <>
-                verifikasi (klaim vs review) · dibaca {vfAge} dtk lalu
-                {vfAge > STALE_VERIFICATION && <span className="vp-warn"> · BASI</span>}
+                xác minh (tự báo cáo so với đánh giá) · đã đọc {vfAge} giây trước
+                {vfAge > STALE_VERIFICATION && <span className="vp-warn"> · ĐÃ CŨ</span>}
               </>
             )}
           </p>
@@ -162,7 +163,7 @@ function KanbanToolbar({
           className="vp-kanban-search"
           value={q}
           onChange={(e) => setQ(e.target.value)}
-          placeholder="cari judul / assignee…"
+          placeholder="tìm tiêu đề / người phụ trách…"
         />
       )}
     </div>

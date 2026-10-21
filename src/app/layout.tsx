@@ -1,10 +1,12 @@
+
+import { t as translate } from '@/lib/i18n'
 import type { Metadata, Viewport } from 'next'
 import './globals.css'
 
 export const metadata: Metadata = {
   title: 'Hermes Virtual Office',
   description:
-    'An open-source 3D virtual workspace and meeting simulator for autonomous AI agents.',
+    translate("layout.text1"),
 }
 
 /**
@@ -26,7 +28,7 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
+    <html lang="vi">
       <body>{children}</body>
     </html>
   )

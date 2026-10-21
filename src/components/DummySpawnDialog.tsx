@@ -5,7 +5,8 @@ import { useOffice } from '@/lib/store'
 import { fetchJson } from '@/lib/api'
 import ModelPicker, { type ModelChoice } from './ModelPicker'
 import RestartNotice from './RestartNotice'
-import { DIVISION_LABEL, type AgentDivision, type AgentRole } from '@/types/hermes'
+import { type AgentDivision, type AgentRole } from '@/types/hermes'
+import { UI_DIVISION_LABEL as DIVISION_LABEL, UI_ROLE_LABEL } from './UiLabels'
 
 /**
  * Spawn prompt for a DUMMY avatar.
@@ -88,7 +89,7 @@ export default function DummySpawnDialog({
     if (done) return
     const clean = name.trim().toLowerCase().replace(/[^a-z0-9-]/g, '-')
     if (!clean) {
-      setNote('Nama agent wajib diisi.')
+      setNote('Cần nhập tên tác tử.')
       return
     }
     setBusy(true)
@@ -105,7 +106,8 @@ export default function DummySpawnDialog({
           role: roleForSlot(avatarId, division),
           model: model || undefined,
           provider: model ? models.find((m) => m.model === model)?.provider : undefined,
-          // A2A: TIDAK dikirim = server default NYALA (SPAWN-A2A-1).
+          // A2A: TIDAK dikirim = server default MATI (opt-in). Daftarkan
+          // manual setelah profil ada bila memang diinginkan.
         }),
       })
       const body = (await res.json().catch(() => ({}))) as {
@@ -116,7 +118,7 @@ export default function DummySpawnDialog({
         a2aError?: string | null
       }
       if (!res.ok) {
-        setNote(body?.error?.message || 'gagal membuat profile')
+        setNote(body?.error?.message || 'không tạo được hồ sơ')
         setBusy(false)
         return
       }
@@ -125,8 +127,8 @@ export default function DummySpawnDialog({
       // harus tahu dia belum terdaftar.
       if (body.a2aRegistered === false) {
         setNote(
-          `Profil "${clean}" dibuat, tapi GAGAL didaftarkan A2A (${body.a2aError ?? 'sebab tak terbaca'}) — ` +
-            `profilnya ada tapi belum terdaftar. Nyalakan manual lewat panel Agent.`,
+          `Hồ sơ "${clean}" đã tạo nhưng đăng ký A2A THẤT BẠI (${body.a2aError ?? 'không đọc được nguyên nhân'}) — ` +
+            `hồ sơ đã có nhưng chưa được đăng ký. Bật thủ công trong bảng Tác tử.`,
         )
         setBusy(false)
         return
@@ -144,8 +146,8 @@ export default function DummySpawnDialog({
       await loadOffice()
       if (!claim.ok) {
         setNote(
-          `Profil "${clean}" dibuat dan terdaftar A2A, tapi badannya GAGAL pindah ke slot ` +
-            `(${claimBody?.error?.message ?? 'sebab tak terbaca'}) — segarkan halaman; agent masuk lewat pintu utama.`,
+          `Hồ sơ "${clean}" đã tạo và đăng ký A2A, nhưng chuyển hình đại diện vào vị trí THẤT BẠI ` +
+            `(${claimBody?.error?.message ?? 'không đọc được nguyên nhân'}) — làm mới trang; tác tử sẽ vào qua cửa chính.`,
         )
         setBusy(false)
         return
@@ -154,10 +156,10 @@ export default function DummySpawnDialog({
       // profilnya sudah jadi.
       setDone(
         body.model
-          ? `Agent "${clean}" di-spawn dengan model ${body.model}.`
+          ? `Tác tử "${clean}" đã khởi tạo với mô hình ${body.model}.`
           : body.modelError
-            ? `Agent "${clean}" di-spawn, tapi model GAGAL diset (${body.modelError}) — sementara pakai bawaan Hermes. Ganti lewat panel Agent.`
-            : `Agent "${clean}" di-spawn dengan model bawaan Hermes.`,
+            ? `Tác tử "${clean}" đã khởi tạo nhưng đặt mô hình THẤT BẠI (${body.modelError}) — tạm dùng mặc định của Hermes. Đổi trong bảng Tác tử.`
+            : `Tác tử "${clean}" đã khởi tạo với mô hình mặc định của Hermes.`,
       )
       // Pendaftaran A2A sukses (default NYALA) → pop up restart.
       if (body.a2aRegistered === true) setRestartFor(clean)
@@ -173,16 +175,16 @@ export default function DummySpawnDialog({
   return (
     <div className="vp-modal-backdrop" onClick={onClose}>
       <div className="vp-modal" onClick={(e) => e.stopPropagation()}>
-        <h3>Spawn agent di slot ini</h3>
+        <h3>Tạo tác tử tại vị trí này</h3>
         <p className="vp-sub">
-          Slot ini masih avatar dummy (gratis, tidak pakai token). Kalau di-spawn, dia jadi agent
-          Hermes asli dengan SOUL.md dan mulai bisa mengerjakan tugas — dan mulai pakai token.
+          Vị trí này hiện là hình đại diện mẫu (miễn phí, không dùng token). Khi khởi tạo, nó trở thành tác tử
+          Hermes thực với SOUL.md, có thể làm việc — và bắt đầu dùng token.
         </p>
         <p className="vp-note">
-          Otomatis terdaftar A2A; berlaku setelah gateway restart. Role slot ini: {roleForSlot(avatarId, division)}.
+          Tự động đăng ký A2A; có hiệu lực sau khi khởi động lại gateway. Vai trò tại vị trí này: {UI_ROLE_LABEL[roleForSlot(avatarId, division)]}.
         </p>
         <label className="vp-field">
-          <span>Nama agent</span>
+          <span>Tên tác tử</span>
           <input
             value={name}
             onChange={(e) => setName(e.target.value)}
@@ -195,31 +197,31 @@ export default function DummySpawnDialog({
           />
         </label>
         <label className="vp-field">
-          <span>Model AI</span>
+          <span>Mô hình AI</span>
           <ModelPicker
             value={model}
             onChange={setModel}
             models={models}
             disabled={busy || !!done}
-            emptyLabel="bawaan Hermes"
-            title="Model untuk agent ini (kosong = bawaan Hermes)"
+            emptyLabel="mặc định của Hermes"
+            title="Mô hình cho tác tử này (để trống = mặc định của Hermes)"
           />
         </label>
-        <p className="vp-muted">Divisi: {DIVISION_LABEL[division]}</p>
+        <p className="vp-muted">Bộ phận: {DIVISION_LABEL[division]}</p>
         {note && <p className="vp-error">{note}</p>}
         {done && <div className="vp-ok">{done}</div>}
         <div className="vp-modal-actions">
           {done ? (
             <button className="vp-btn primary" onClick={onClose} autoFocus>
-              Tutup
+              Đóng
             </button>
           ) : (
             <>
               <button className="vp-btn" onClick={onClose} disabled={busy}>
-                Batal
+                Hủy
               </button>
               <button className="vp-btn primary" onClick={() => void spawn()} disabled={busy}>
-                {busy ? 'Membuat…' : 'Spawn agent'}
+                {busy ? 'Đang tạo…' : 'Tạo tác tử'}
               </button>
             </>
           )}

@@ -1,5 +1,7 @@
 'use client'
 
+import { t as translate } from '@/lib/i18n'
+
 import { useEffect, useRef } from 'react'
 import { createScene, type OfficeScene } from '@/lib/office/scene'
 import { useOffice } from '@/lib/store'
@@ -111,9 +113,9 @@ export default function Scene3D({ onScene, onDummy, onBoard, onName }: Props) {
     for (let i = said.current; i < turns.length; i++) {
       const t = turns[i]
       if (t.kind === 'minutes') {
-        s.say(meeting.moderator, 'notulen siap — lihat panel')
+        s.say(meeting.moderator, translate("Scene3D.text1"))
       } else {
-        const label = t.kind === 'opening' ? 'membuka rapat' : t.text.slice(0, 140)
+        const label = t.kind === 'opening' ? translate("Scene3D.text2") : t.text.slice(0, 140)
         s.say(t.speaker, label, 9000)
       }
     }

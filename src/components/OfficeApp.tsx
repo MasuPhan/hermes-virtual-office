@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react'
 import dynamic from 'next/dynamic'
 import Kanban2D from './Kanban2D'
+import { UI_ROLE_LABEL, uiState } from './UiLabels'
 import SpriteOffice from './SpriteOffice'
 import PeekPanel from './PeekPanel'
 import TaskPanel from './TaskPanel'
@@ -28,7 +29,7 @@ import type { AgentDivision } from '@/types/hermes'
  */
 const Scene3D = dynamic(() => import('./Scene3D'), {
   ssr: false,
-  loading: () => <div className="absolute inset-0 grid place-items-center vp-muted">memuat ruangan…</div>,
+  loading: () => <div className="absolute inset-0 grid place-items-center vp-muted">đang tải văn phòng…</div>,
 })
 
 export default function OfficeApp() {
@@ -84,7 +85,7 @@ export default function OfficeApp() {
     for (const t of tasks) {
       const prev = seen.current.get(t.id)
       if (prev && prev !== t.status && (t.status === 'review' || t.status === 'blocked')) {
-        new Notification(`Kanban · ${t.status}`, { body: t.title })
+        new Notification(`Kanban · ${uiState(t.status)}`, { body: t.title })
       }
       seen.current.set(t.id, t.status)
     }
@@ -137,29 +138,29 @@ export default function OfficeApp() {
           <span className="vp-logo">Hermes Office</span>
           <span className={`vp-dot ${backendOnline ? 'ok' : 'bad'}`} />
           <span className="vp-muted vp-topbar-status">
-            {backendOnline ? `${agents.length} agent · ${running} jalan · ${pct}% rilis` : 'backend offline'}
+            {backendOnline ? `${agents.length} tác tử · ${running} đang chạy · ${pct}% hoàn tất` : 'máy chủ ngoại tuyến'}
           </span>
         </div>
 
-        <nav className="vp-topbar-nav flex items-center gap-2" aria-label="Panel">
-          <button className="vp-btn vp-btn-ghost" onClick={() => setNewTaskOpen(true)}>+ Tugas</button>
+        <nav className="vp-topbar-nav flex items-center gap-2" aria-label="Bảng điều khiển">
+          <button className="vp-btn vp-btn-ghost" onClick={() => setNewTaskOpen(true)}>+ Công việc</button>
           <button className="vp-btn vp-btn-ghost" onClick={() => setMeetOpen(true)}>
-            Ruang rapat{meeting && meeting.state === 'running' ? ' ●' : ''}
+            Phòng họp{meeting && meeting.state === 'running' ? ' ●' : ''}
           </button>
           <button className="vp-btn vp-btn-ghost" onClick={() => setAgentOpen(true)}>
-            Agent ({agents.length})
+            Tác tử ({agents.length})
           </button>
           <button className="vp-btn vp-btn-ghost" onClick={() => setCronOpen(true)}>
-            Cron
+            Lịch định kỳ
           </button>
           <button className="vp-btn vp-btn-ghost" onClick={() => setPanelOpen(true)}>
-            Papan
+            Bảng công việc
           </button>
           <button className="vp-btn vp-btn-ghost" onClick={() => setSystemOpen(true)}>
-            Sistem
+            Hệ thống
           </button>
           <button className="vp-btn vp-btn-ghost" onClick={() => setChatOpen(true)}>
-            Chat
+            Trò chuyện
           </button>
         </nav>
         {/* Saklar tampilan sengaja di luar <nav>: di HP baris tombol bisa digeser ke
@@ -167,7 +168,7 @@ export default function OfficeApp() {
         <div className={`vp-seg vp-topbar-view ${view === 'sprite' ? 'vp-sprite-toggle' : ''}`}>
           <button className={view === '3d' ? 'on' : ''} onClick={() => setView('3d')}>3D</button>
           <button className={view === '2d' ? 'on' : ''} onClick={() => setView('2d')}>Kanban</button>
-          <button className={view === 'sprite' ? 'on' : ''} onClick={() => setView('sprite')}>Sprite</button>
+          <button className={view === 'sprite' ? 'on' : ''} onClick={() => setView('sprite')}>Điểm ảnh</button>
         </div>
       </header>
 
@@ -180,11 +181,11 @@ export default function OfficeApp() {
           <aside className="vp-card-float">
             <div className="flex items-center justify-between">
               <b>{a.displayName}</b>
-              <button className="vp-x" onClick={() => select(null)} aria-label="Tutup">×</button>
+              <button className="vp-x" onClick={() => select(null)} aria-label="Đóng">×</button>
             </div>
-            <div className="vp-kv"><span>peran</span><b>{a.role}</b></div>
-            <div className="vp-kv"><span>status</span><b>{a.status}</b></div>
-            <div className="vp-kv"><span>tugas</span><b>{t?.title || '—'}</b></div>
+            <div className="vp-kv"><span>vai trò</span><b>{UI_ROLE_LABEL[a.role] ?? a.role}</b></div>
+            <div className="vp-kv"><span>trạng thái</span><b>{uiState(a.status)}</b></div>
+            <div className="vp-kv"><span>công việc</span><b>{t?.title || '—'}</b></div>
           </aside>
         )
       })()}

@@ -4,10 +4,12 @@ import { useEffect, useState } from 'react'
 import { fetchJson } from '@/lib/api'
 import ModelPicker, { type ModelChoice } from './ModelPicker'
 import type { AgentDivision, AgentRole } from '@/types/hermes'
-import { DIVISION_LABEL } from '@/types/hermes'
-import { ROLE_LABEL } from '@/lib/hermes/soul'
+import { UI_DIVISION_LABEL as DIVISION_LABEL, UI_ROLE_LABEL as ROLE_LABEL } from './UiLabels'
 import FullPanel from './FullPanel'
 import RestartNotice from './RestartNotice'
+import AvatarPanel from './AvatarPanel'
+import { useOffice } from '@/lib/store'
+import { officeDivision } from '@/lib/office/types'
 
 /**
  * Spawn / hide / kill control.
@@ -58,6 +60,7 @@ export default function AgentSpawnPanel({
   onClose: () => void
   onChanged: () => void
 }) {
+  const avatars = useOffice((s) => s.avatars)
   const [rows, setRows] = useState<Row[]>([])
   const [perms, setPerms] = useState<Permissions>({})
   const [busy, setBusy] = useState<string | null>(null)
@@ -81,11 +84,11 @@ export default function AgentSpawnPanel({
   const [newToolsets, setNewToolsets] = useState<string[]>([])
   const [toolsetCatalog, setToolsetCatalog] = useState<{ name: string; enabled: boolean }[]>([])
   /**
-   * Toggle A2A: default NYALA (permintaan operator: spawn dari mana pun harus
-   * langsung A2A). Hidup = daftarkan served-agent (local:false). Berlaku
-   * setelah gateway di-restart — form tidak janji "langsung aktif".
+   * Toggle A2A: default MATI (opt-in). Hanya `serveA2a: true` eksplisit yang
+   * mencoba mendaftarkan served-agent; create tidak menyentuh config gateway
+   * secara diam-diam.
    */
-  const [newServeA2a, setNewServeA2a] = useState(true)
+  const [newServeA2a, setNewServeA2a] = useState(false)
   /** Domain yang tidak punya pemilik: dinyatakan apa adanya, bukan diarang. */
   const [domainOwners, setDomainOwners] = useState<Record<string, string | null>>({})
   /** Model untuk profil yang SEDANG dibuat; '' = bawaan Hermes. Terpisah dari `pick`
@@ -123,7 +126,7 @@ export default function AgentSpawnPanel({
       const res = await fetchJson<{ available?: Row[]; permissions?: Permissions; domainOwners?: Record<string, string | null>; needsGatewayRestart?: boolean | null }>('/api/hermes/agents', {
         cache: 'no-store',
       })
-      if (!res.ok) throw new Error(res.error || 'gagal memuat daftar agent')
+      if (!res.ok) throw new Error(res.error || 'không tải được danh sách tác tử')
       setRows(res.data?.available || [])
       setPerms(res.data?.permissions || {})
       setDomainOwners(res.data?.domainOwners || {})
@@ -174,8 +177,8 @@ export default function AgentSpawnPanel({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'set-model', name, model, provider: hit?.provider }),
       })
-      if (!res.ok) throw new Error(res.error || 'gagal menyimpan model')
-      setNote(`Model "${name}" diset ke ${model} — berlaku pada spawn/chat berikutnya.`)
+      if (!res.ok) throw new Error(res.error || 'không lưu được mô hình')
+      setNote(`Mô hình của "${name}" được đặt thành ${model} — áp dụng cho lần khởi chạy/trò chuyện tiếp theo.`)
       await load()
       onChanged()
     } catch (e) {
@@ -203,32 +206,32 @@ export default function AgentSpawnPanel({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action, name }),
       })
-      if (!res.ok) throw new Error(res.error || 'aksi gagal')
+      if (!res.ok) throw new Error(res.error || 'thao tác thất bại')
       const d = res.data
       if (action === 'kill') {
         const n = Number(d?.purged ?? 0)
         setNote(
           n > 0
-            ? `"${name}" dihapus permanen bersama ${n} tugasnya`
-            : `"${name}" dihapus permanen`,
+            ? `"${name}" đã bị xóa vĩnh viễn cùng ${n} việc của tác tử`
+            : `"${name}" đã bị xóa vĩnh viễn`,
         )
       } else if (action === 'hide') {
-        setNote(`"${name}" disembunyikan — tugasnya tetap di papan`)
+        setNote(`"${name}" đã ẩn — công việc vẫn còn trên bảng`)
       } else if (action === 'serve') {
         // SELFREPAIR-1 Celah 1: jujur — terdaftar, tapi BERLAKU SETELAH
         // restart gateway (bukan langsung "siap"). A2A-CALL-1: pratinjau +
         // laporan kemampuan MEMANGGIL (peer + toolset, idempoten).
         const callBits: string[] = []
-        if (d?.toolsetAdded === true) callBits.push('toolset a2a ditambahkan (bisa memanggil)')
-        else if (d?.toolsetAdded === false && d?.toolsetError) callBits.push(`toolset a2a GAGAL (${d.toolsetError})`)
-        else callBits.push('toolset a2a sudah ada (bisa memanggil)')
-        if (d?.peerAdded === true) callBits.push(`peer ${name}-local didaftarkan`)
-        else if (d?.peerAdded === false && d?.peerError) callBits.push(`peer GAGAL (${d.peerError})`)
-        else callBits.push(`peer ${name}-local sudah ada`)
-        setNote(`"${name}" ${d?.a2aNote ?? 'terdaftar. Berlaku setelah gateway di-restart.'} ${callBits.join(' · ')}.`)
+        if (d?.toolsetAdded === true) callBits.push('đã thêm bộ công cụ a2a (có thể gọi)')
+        else if (d?.toolsetAdded === false && d?.toolsetError) callBits.push(`thêm bộ công cụ a2a THẤT BẠI (${d.toolsetError})`)
+        else callBits.push('bộ công cụ a2a đã có (có thể gọi)')
+        if (d?.peerAdded === true) callBits.push(`peer ${name}-local đã đăng ký`)
+        else if (d?.peerAdded === false && d?.peerError) callBits.push(`đăng ký peer THẤT BẠI (${d.peerError})`)
+        else callBits.push(`peer ${name}-local đã có`)
+        setNote(`"${name}" ${d?.a2aNote ?? 'đã đăng ký. Có hiệu lực sau khi khởi động lại gateway.'} ${callBits.join(' · ')}.`)
         if (d?.needsGatewayRestart != null) setNeedsGatewayRestart(d.needsGatewayRestart)
       } else if (action === 'unserve') {
-        setNote(`"${name}" ${d?.a2aNote ?? 'tercabut dari config.'}`)
+        setNote(`"${name}" ${d?.a2aNote ?? 'đã gỡ khỏi cấu hình.'}`)
       }
       await load()
       onChanged()
@@ -279,43 +282,43 @@ export default function AgentSpawnPanel({
           provider: newModel ? hit?.provider : undefined,
         }),
       })
-      if (!res.ok || !res.data) throw new Error(res.error || 'gagal membuat profil')
+      if (!res.ok || !res.data) throw new Error(res.error || 'không tạo được hồ sơ')
       setNewName('')
       setNewDesc('')
       setNewSoul('')
       setNewDomains('')
       setNewToolsets([])
-      setNewServeA2a(true)
+      setNewServeA2a(false)
       setNewModel('')
       setSoulPreview(res.data.soulPreview ?? null)
       // Laporkan model dari BALASAN server, bukan dari pilihan di form: kalau set-model
       // gagal, operator harus tahu agent ini jalan dengan bawaan Hermes.
       const modelNote = res.data.model
-        ? `model ${res.data.model}`
+        ? `mô hình ${res.data.model}`
         : res.data.modelError
-          ? `model GAGAL diset (${res.data.modelError}) — sementara pakai bawaan Hermes`
-          : 'model bawaan Hermes'
-      const domNote = res.data.domains?.length ? `keahlian: ${res.data.domains.join(', ')} (pemetaan office, bukan A2A). ` : ''
+          ? `đặt mô hình THẤT BẠI (${res.data.modelError}) — tạm dùng mặc định của Hermes`
+          : 'mô hình mặc định của Hermes'
+      const domNote = res.data.domains?.length ? `chuyên môn: ${res.data.domains.join(', ')} (phân công trong văn phòng, không phải A2A). ` : ''
       const a2aNote = res.data.a2aRegistered === true
-        ? `${res.data.a2aNote ?? 'Tersimpan. Berlaku setelah gateway di-restart.'} `
+        ? `${res.data.a2aNote ?? 'Đã lưu. Có hiệu lực sau khi khởi động lại gateway.'} `
         : res.data.a2aRegistered === false
-          ? `GAGAL didaftarkan A2A (${res.data.a2aError}) — profilnya ada tapi belum terdaftar. `
-          : 'A2A tidak didaftarkan (toggle mati) — profilnya ada tapi belum terdaftar. Nyalakan manual bila perlu. '
+          ? `Đăng ký A2A THẤT BẠI (${res.data.a2aError}) — hồ sơ đã có nhưng chưa được đăng ký. `
+          : 'Chưa đăng ký A2A (đang tắt) — hồ sơ đã có nhưng chưa được đăng ký. Bật thủ công nếu cần. '
       // A2A-CALL-1: kemampuan MEMANGGIL ikut dilaporkan (pratinjau + laporan,
       // idempoten — dua kali jalan tak menggandakan).
       const callNote = res.data.a2aRegistered === true
         ? (res.data.toolsetAdded === true
-          ? 'toolset a2a ditambahkan (bisa memanggil). '
+          ? 'đã thêm bộ công cụ a2a (có thể gọi). '
           : res.data.toolsetAdded === false && res.data.toolsetError
-            ? `toolset a2a GAGAL (${res.data.toolsetError}). `
-            : 'toolset a2a sudah ada (bisa memanggil). ') +
+            ? `thêm bộ công cụ a2a THẤT BẠI (${res.data.toolsetError}). `
+            : 'bộ công cụ a2a đã có (có thể gọi). ') +
           (res.data.peerAdded === true
-            ? `peer ${res.data.name}-local didaftarkan (nama bisa diresolusi). `
+            ? `peer ${res.data.name}-local đã đăng ký (có thể phân giải tên). `
             : res.data.peerAdded === false && res.data.peerError
-              ? `peer GAGAL (${res.data.peerError}). `
-              : `peer ${res.data.name}-local sudah ada. `)
+              ? `đăng ký peer THẤT BẠI (${res.data.peerError}). `
+              : `peer ${res.data.name}-local đã có. `)
         : ''
-      setNote(`profil "${res.data.name}" dibuat, ${modelNote} — agent berjalan masuk lewat pintu utama. ${domNote}${a2aNote}${callNote}`)
+      setNote(`hồ sơ "${res.data.name}" đã tạo, ${modelNote} — tác tử đi vào qua cửa chính. ${domNote}${a2aNote}${callNote}`)
       setNeedsGatewayRestart(res.data.needsGatewayRestart ?? null)
       // Pendaftaran A2A sukses → pop up "silahkan restart server". Gagal =
       // JANGAN tampilkan pop up sukses (catatan di atas sudah bilang gagal).
@@ -331,37 +334,38 @@ export default function AgentSpawnPanel({
 
   if (!open) return null
 
-  const matchDiv = (r: Row) => divFilter === 'all' || r.division === divFilter
+  const divisionFor = (r: Row) => officeDivision(avatars.find((a) => a.avatarId === `agent:${r.name}`) ?? { useHermesDivision: true }, r.division as AgentDivision | null)
+  const matchDiv = (r: Row) => divFilter === 'all' || divisionFor(r) === divFilter
   const inOffice = rows.filter((r) => r.inOffice && matchDiv(r))
   const out = rows.filter((r) => !r.inOffice && matchDiv(r))
 
   /** Badge role + divisi + indikator soul + status A2A. Aman bila field null (backend lama). */
   function badges(r: Row) {
     const roleLabel = r.role ? (ROLE_LABEL as Record<string, string>)[r.role] ?? r.role : null
-    const divLabel = r.division ? (DIVISION_LABEL as Record<string, string>)[r.division] ?? null : null
+    const divLabel = DIVISION_LABEL[divisionFor(r)]
     return (
       <span style={{ display: 'inline-flex', gap: 4, flexWrap: 'wrap', marginTop: 2 }}>
         {roleLabel && (
-          <span className="vp-chip" title={`role: ${r.role}`}>
+          <span className="vp-chip" title={`vai trò: ${r.role}`}>
             {roleLabel}
           </span>
         )}
         {divLabel && (
-          <span className="vp-chip" title={`divisi: ${r.division}`}>
+          <span className="vp-chip" title={`bộ phận: ${r.division}`}>
             {divLabel}
           </span>
         )}
         {(r.domains?.length ?? 0) > 0 && (
-          <span className="vp-chip" title={`keahlian (pemetaan office, bukan A2A): ${(r.domains ?? []).join(', ')}`}>
+          <span className="vp-chip" title={`chuyên môn (phân công trong văn phòng, không phải A2A): ${(r.domains ?? []).join(', ')}`}>
             {(r.domains ?? []).join(', ')}
           </span>
         )}
         {r.soulExists === true && (
-          <span className="vp-chip" title="Profil ini punya SOUL.md sendiri">
-            soul ✓
+          <span className="vp-chip" title="Hồ sơ này có SOUL.md riêng">
+            SOUL ✓
           </span>
         )}
-        {r.soulExists === false && <span className="vp-tag-warn">tanpa soul</span>}
+        {r.soulExists === false && <span className="vp-tag-warn">chưa có SOUL</span>}
         {a2aBadge(r)}
       </span>
     )
@@ -384,8 +388,8 @@ export default function AgentSpawnPanel({
       if (r.a2a === 'unlisted' && r.profile) {
         return (
           <span className="flex flex-wrap items-center gap-2">
-            <span className="vp-tag-warn" title="Tidak ada entri di platforms.a2a.agents">
-              ❌ Belum terdaftar A2A
+            <span className="vp-tag-warn" title="Chưa có mục trong platforms.a2a.agents">
+              ❌ Chưa đăng ký A2A
             </span>
             <button
               className="vp-chip-btn"
@@ -394,36 +398,36 @@ export default function AgentSpawnPanel({
                 e.stopPropagation()
                 void act('serve', r.name)
               }}
-              title="Daftarkan profil ini di platforms.a2a.agents (local:false). Berlaku setelah gateway di-restart."
+              title="Đăng ký hồ sơ này vào platforms.a2a.agents (local:false). Có hiệu lực sau khi khởi động lại gateway."
             >
-              {busy === r.name ? '…' : 'daftarkan ke A2A'}
+              {busy === r.name ? '…' : 'đăng ký A2A'}
             </button>
           </span>
         )
       }
       return (
-        <span className="vp-tag-warn" title="Tidak ada entri di platforms.a2a.agents — nyalakan A2A untuk agent ini">
-          ❌ Belum terdaftar A2A — nyalakan A2A untuk agent ini
+        <span className="vp-tag-warn" title="Chưa có mục trong platforms.a2a.agents — hãy bật A2A cho tác tử này">
+          ❌ Chưa đăng ký A2A — hãy bật A2A cho tác tử này
         </span>
       )
     }
     if (needsGatewayRestart === true) {
       return (
-        <span className="vp-tag-warn" title="Ada di platforms.a2a.agents, tapi config.yaml lebih baru dari start gateway — daftar baru berlaku setelah restart">
-          🟡 Terdaftar, belum aktif — butuh restart gateway
+        <span className="vp-tag-warn" title="Đã có trong platforms.a2a.agents, nhưng config.yaml mới hơn lần chạy gateway — đăng ký chỉ có hiệu lực sau khi khởi động lại">
+          🟡 Đã đăng ký, chưa hoạt động — cần khởi động lại gateway
         </span>
       )
     }
     if (needsGatewayRestart === false) {
       return (
-        <span className="vp-chip" title="Terdaftar DAN gateway sudah restart sesudahnya — benar-benar bisa dipanggil">
-          ✅ A2A siap — agent ini bisa dipanggil sekarang
+        <span className="vp-chip" title="Đã đăng ký VÀ gateway đã khởi động lại sau đó — có thể gọi thực sự">
+          ✅ A2A sẵn sàng — có thể gọi tác tử này ngay
         </span>
       )
     }
     return (
-      <span className="vp-tag-warn" title="Terdaftar, tapi waktu start gateway tak terbaca — tidak bisa dipastikan sudah aktif">
-        A2A terdaftar (tak pasti aktif — start gateway tak terbaca)
+      <span className="vp-tag-warn" title="Đã đăng ký nhưng không đọc được thời điểm chạy gateway — chưa xác định được trạng thái hoạt động">
+        Đã đăng ký A2A (chưa rõ hoạt động — không đọc được thời điểm chạy gateway)
       </span>
     )
   }
@@ -433,30 +437,30 @@ export default function AgentSpawnPanel({
     const p = r.role ? perms[r.role] : undefined
     if (!p) return null
     const allow = p.allow.length
-      ? p.allow.join(', ') + (p.anyTask ? '' : ' (task sendiri)')
+      ? p.allow.join(', ') + (p.anyTask ? '' : ' (chỉ việc của mình)')
       : '—'
     return (
-      <span className="vp-muted" style={{ fontSize: 11 }} title="Batas izin bila aksi diminta atas nama agent ini">
-        boleh: {allow} · tidak boleh: {p.deny.length ? p.deny.join(', ') : '—'}
+      <span className="vp-muted" style={{ fontSize: 11 }} title="Giới hạn quyền khi yêu cầu thao tác thay mặt tác tử này">
+        được phép: {allow} · không được phép: {p.deny.length ? p.deny.join(', ') : '—'}
       </span>
     )
   }
 
   return (
-    <FullPanel onClose={onClose} label="Agent" title="Agent" bodyClassName="vp-pad flex flex-col gap-3">
+    <FullPanel onClose={onClose} label="Tác tử" title="Tác tử" bodyClassName="vp-pad flex flex-col gap-3">
       {restartFor && <RestartNotice agentName={restartFor} onClose={() => setRestartFor(null)} />}
       <div className="vp-kv">
-        <span>di kantor</span>
+        <span>trong văn phòng</span>
         <b>{inOffice.length}</b>
       </div>
       <div className="vp-kv">
-        <span>profil tersedia</span>
+        <span>hồ sơ hiện có</span>
         <b>{rows.length}</b>
       </div>
       {needsGatewayRestart === true && (
         <div className="vp-err">
-          🟡 Config lebih baru dari start gateway — entri served tersimpan tapi BELUM aktif. Restart gateway untuk
-          mengaktifkannya.
+          🟡 Cấu hình mới hơn lần chạy gateway — đăng ký đã lưu nhưng CHƯA hoạt động. Khởi động lại gateway để
+          kích hoạt.
         </div>
       )}
 
@@ -464,13 +468,13 @@ export default function AgentSpawnPanel({
       {note && <div className="vp-ok">{note}</div>}
       {soulPreview && (
         <div className="vp-ok">
-          <b>Soul tersimpan:</b>
+          <b>Đã lưu SOUL:</b>
           <pre style={{ whiteSpace: 'pre-wrap', margin: '4px 0 0', fontSize: 11 }}>{soulPreview}</pre>
         </div>
       )}
-      {loading && <div className="vp-muted">memuat…</div>}
+      {loading && <div className="vp-muted">đang tải…</div>}
 
-      <div className="vp-sub">BUAT PROFIL BARU</div>
+      <div className="vp-sub">TẠO HỒ SƠ MỚI</div>
       <input
         className="vp-input"
         value={newName}
@@ -489,7 +493,7 @@ export default function AgentSpawnPanel({
         className="vp-input"
         value={newDesc}
         onChange={(e) => setNewDesc(e.target.value)}
-        placeholder="Deskripsi agent card — DIBACA AGENT LAIN saat discovery. Tulis kosakata domain yang akan dicari, cth: Menangani iklan Meta & Google: budget, CPA, laporan performa mingguan. Hubungi kalau butuh angka spend atau hasil kampanye."
+        placeholder="Mô tả thẻ tác tử — TÁC TỬ KHÁC đọc khi tìm kiếm. Dùng từ khóa chuyên môn, ví dụ: Quản lý quảng cáo Meta & Google: ngân sách, CPA, báo cáo hiệu quả hằng tuần. Liên hệ để lấy chi phí hoặc kết quả chiến dịch."
         rows={2}
       />
       {/*
@@ -501,14 +505,14 @@ export default function AgentSpawnPanel({
         className="vp-input"
         value={newDomains}
         onChange={(e) => setNewDomains(e.target.value)}
-        placeholder="Keahlian/domain, pisah koma — cth: meta-ads, reporting, budget (pemetaan office, bukan A2A)"
+        placeholder="Chuyên môn/lĩnh vực, cách nhau bằng dấu phẩy — ví dụ: meta-ads, reporting, budget (phân công trong văn phòng, không phải A2A)"
       />
       <div className="flex gap-2">
         <select
           className="vp-input"
           value={newRole}
           onChange={(e) => setNewRole(e.target.value as AgentRole)}
-          title="Role agent"
+          title="Vai trò tác tử"
         >
           {ROLE_OPTIONS.map(([v, label]) => (
             <option key={v} value={v}>
@@ -520,7 +524,7 @@ export default function AgentSpawnPanel({
           className="vp-input"
           value={newDivision}
           onChange={(e) => setNewDivision(e.target.value as AgentDivision)}
-          title="Divisi agent"
+          title="Bộ phận của tác tử"
         >
           {DIVISION_OPTIONS.map(([v, label]) => (
             <option key={v} value={v}>
@@ -533,7 +537,7 @@ export default function AgentSpawnPanel({
         className="vp-input"
         value={newSoul}
         onChange={(e) => setNewSoul(e.target.value)}
-        placeholder="cth: Budi adalah CEO visioner — ambil keputusan akhir, bagi tugas ke tiap divisi, jaga visi perusahaan. Gaya: tegas, ringkas, eksekusi langsung. (opsional)"
+        placeholder="Ví dụ: Budi là CEO có tầm nhìn — quyết định cuối cùng, giao việc cho từng bộ phận, giữ định hướng công ty. Phong cách: quyết đoán, ngắn gọn, làm ngay. (không bắt buộc)"
         rows={3}
       />
       <ModelPicker
@@ -541,16 +545,16 @@ export default function AgentSpawnPanel({
         onChange={setNewModel}
         models={models}
         disabled={creating}
-        emptyLabel="bawaan Hermes"
-        title="Model untuk agent baru ini (kosong = bawaan Hermes)"
+        emptyLabel="mặc định của Hermes"
+        title="Mô hình cho tác tử mới (để trống = mặc định của Hermes)"
       />
       {/*
         Toolset yang DIUMUMKAN di agent card (`advertised_toolsets`). Hanya
         nama toolset nyata Hermes — skills di card diturunkan dari registry,
         bukan tag bebas. Kosong = umumkan semua toolset.
       */}
-      <div className="vp-sub" title="Toolset nyata yang diumumkan di agent card A2A. Kosong = semua.">
-        UMUMKAN DI AGENT CARD (KOSONG = SEMUA)
+      <div className="vp-sub" title="Bộ công cụ thực được công bố trên thẻ tác tử A2A. Để trống = tất cả.">
+        CÔNG BỐ TRÊN THẺ TÁC TỬ (TRỐNG = TẤT CẢ)
       </div>
       <div className="flex flex-wrap gap-1" style={{ maxHeight: 120, overflowY: 'auto' }}>
         {toolsetCatalog.map((t) => {
@@ -564,17 +568,17 @@ export default function AgentSpawnPanel({
               onClick={() =>
                 setNewToolsets((prev) => (prev.includes(t.name) ? prev.filter((x) => x !== t.name) : [...prev, t.name]))
               }
-              title={`${t.name}${t.enabled ? '' : ' (nonaktif di install ini)'}`}
+              title={`${t.name}${t.enabled ? '' : ' (đang tắt trong bản cài này)'}`}
               style={{ opacity: t.enabled ? 1 : 0.55 }}
             >
               {on ? '✓ ' : ''}{t.name}
             </button>
           )
         })}
-        {!toolsetCatalog.length && <span className="vp-muted">memuat daftar toolset…</span>}
+        {!toolsetCatalog.length && <span className="vp-muted">đang tải danh sách bộ công cụ…</span>}
       </div>
       {/*
-        Toggle A2A: default NYALA (permintaan operator). Hidup = tulis entri
+        Toggle A2A: default MATI (opt-in). Hidup = coba tulis entri
         served-agent (local:false, dijawab profil ini sendiri). BERLAKU SETELAH
         GATEWAY DI-RESTART — form tidak menampilkan "aktif" sebelum itu.
       */}
@@ -585,8 +589,8 @@ export default function AgentSpawnPanel({
           disabled={creating}
           onChange={(e) => setNewServeA2a(e.target.checked)}
         />
-        <span title="Daftarkan profil ini di platforms.a2a.agents (local:false). Berlaku setelah gateway di-restart.">
-          Bisa dihubungi agent lain (A2A) — otomatis terdaftar A2A; berlaku setelah gateway di-restart
+        <span title="Đăng ký hồ sơ này vào platforms.a2a.agents (local:false). Có hiệu lực sau khi khởi động lại gateway.">
+          Cho phép tác tử khác liên hệ (A2A) — tự chọn bật; đăng ký cấu hình gateway vẫn tạm hoãn trong bản vá bảo mật này
         </span>
       </label>
       <button
@@ -594,11 +598,11 @@ export default function AgentSpawnPanel({
         disabled={creating || !newName.trim()}
         onClick={create}
       >
-        {creating ? 'Membuat…' : '+ Buat profil'}
+        {creating ? 'Đang tạo…' : '+ Tạo hồ sơ'}
       </button>
 
       <button className="vp-btn vp-btn-rosy" disabled={!!busy} onClick={load}>
-        Segarkan
+        Làm mới
       </button>
 
       {/*
@@ -607,26 +611,26 @@ export default function AgentSpawnPanel({
       */}
       {Object.keys(domainOwners).length > 0 && (
         <>
-          <div className="vp-sub">SIAPA PEGANG APA (OFFICE, BUKAN A2A)</div>
+          <div className="vp-sub">AI PHỤ TRÁCH GÌ (VĂN PHÒNG, KHÔNG PHẢI A2A)</div>
           <div className="flex flex-col gap-1">
             {Object.entries(domainOwners).map(([d, owner]) => (
               <div key={d} className="vp-kv">
                 <span>{d}</span>
-                <b>{owner ?? 'tidak ada pemilik'}</b>
+                <b>{owner ?? 'chưa có người phụ trách'}</b>
               </div>
             ))}
           </div>
         </>
       )}
 
-      <div className="vp-sub">FILTER DIVISI</div>
+      <div className="vp-sub">LỌC BỘ PHẬN</div>
       <select
         className="vp-input"
         value={divFilter}
         onChange={(e) => setDivFilter(e.target.value as 'all' | AgentDivision)}
-        title="Filter daftar agent per divisi"
+        title="Lọc danh sách tác tử theo bộ phận"
       >
-        <option value="all">Semua</option>
+        <option value="all">Tất cả</option>
         {DIVISION_OPTIONS.map(([v, label]) => (
           <option key={v} value={v}>
             {label}
@@ -634,18 +638,19 @@ export default function AgentSpawnPanel({
         ))}
       </select>
 
-      <div className="vp-sub">DI KANTOR ({inOffice.length})</div>
+      <div className="vp-sub">TRONG VĂN PHÒNG ({inOffice.length})</div>
       <div className="flex flex-col gap-2">
         {inOffice.map((r) => (
           <div key={r.name} className="vp-agent-row">
             <div className="vp-agent-meta">
               <b>
                 {r.name}
-                {!r.profile && <span className="vp-tag-warn">tanpa profil</span>}
+                {!r.profile && <span className="vp-tag-warn">chưa có hồ sơ</span>}
               </b>
-              <i>{r.total} tugas</i>
+              <i>{r.total} công việc</i>
               {badges(r)}
               {limits(r)}
+              <AvatarPanel avatarId={`agent:${r.name}`} name={r.name} />
             </div>
             {/* The profile's default model: what its workers and chats run.
                 Saving here writes `model.default` for that profile, so it
@@ -657,8 +662,8 @@ export default function AgentSpawnPanel({
                   onChange={(model) => setPick((p) => ({ ...p, [r.name]: model }))}
                   models={models}
                   disabled={busy === r.name}
-                  emptyLabel="bawaan Hermes"
-                  title="Model bawaan profil ini"
+                  emptyLabel="mặc định của Hermes"
+                  title="Mô hình mặc định của hồ sơ này"
                 />
                 <button
                   className="vp-btn"
@@ -668,7 +673,7 @@ export default function AgentSpawnPanel({
                     void setModel(r.name, pick[r.name] ?? '')
                   }}
                 >
-                  {busy === r.name ? '…' : 'Set'}
+                  {busy === r.name ? '…' : 'Lưu'}
                 </button>
               </div>
             )}
@@ -686,9 +691,9 @@ export default function AgentSpawnPanel({
                   e.stopPropagation()
                   void act('hide', r.name)
                 }}
-                title="Keluarkan nama ini dari kantor tanpa menghapus apa pun"
+                title="Ẩn tên này khỏi văn phòng mà không xóa dữ liệu"
               >
-                {busy === r.name ? '…' : 'Sembunyikan'}
+                {busy === r.name ? '…' : 'Ẩn'}
               </button>
               {r.profile && (
                 <button
@@ -702,9 +707,9 @@ export default function AgentSpawnPanel({
                     }
                     void act('kill', r.name)
                   }}
-                  title="Menghapus profil ini permanen, termasuk sesi dan kuncinya"
+                  title="Xóa vĩnh viễn hồ sơ này, bao gồm phiên và khóa"
                 >
-                  {busy === r.name ? '…' : confirmKill === r.name ? 'Yakin hapus?' : 'Kill'}
+                  {busy === r.name ? '…' : confirmKill === r.name ? 'Xác nhận xóa?' : 'Xóa vĩnh viễn'}
                 </button>
               )}
             </div>
@@ -712,42 +717,43 @@ export default function AgentSpawnPanel({
         ))}
         {confirmKill && (
           <div className="vp-cron-err">
-            Menghapus <b>{confirmKill}</b> permanen — profil, sesi, memori, kunci,
-            <b> dan {inOffice.find((x) => x.name === confirmKill)?.total ?? 0} tugasnya</b>.
-            Klik di tempat lain untuk batal.
+            Xóa <b>{confirmKill}</b> vĩnh viễn — hồ sơ, phiên, bộ nhớ, khóa,
+            <b> và {inOffice.find((x) => x.name === confirmKill)?.total ?? 0} việc của tác tử</b>.
+            Nhấn ra ngoài để hủy.
           </div>
         )}
-        {!inOffice.length && <span className="vp-muted">kosong</span>}
+        {!inOffice.length && <span className="vp-muted">trống</span>}
       </div>
 
       {out.length > 0 && (
         <>
-          <div className="vp-sub">DI LUAR ({out.length})</div>
+          <div className="vp-sub">BÊN NGOÀI ({out.length})</div>
           <div className="flex flex-col gap-2">
             {out.map((r) => (
               <div key={r.name} className="vp-agent-row off">
                 <div className="vp-agent-meta">
                   <b>
                     {r.name}
-                    {!r.profile && <span className="vp-tag-warn">tanpa profil</span>}
+                    {!r.profile && <span className="vp-tag-warn">chưa có hồ sơ</span>}
                   </b>
                   <i>
                     {r.reason === 'hidden'
-                      ? 'disembunyikan'
+                      ? 'đã ẩn'
                       : r.reason === 'no_profile'
-                        ? 'tanpa profil di disk'
-                        : 'tanpa tugas'}
+                        ? 'chưa có hồ sơ trên đĩa'
+                        : 'chưa có việc'}
                   </i>
                   {badges(r)}
                   {limits(r)}
+                  <AvatarPanel avatarId={`agent:${r.name}`} name={r.name} />
                 </div>
                 <button
                   className="vp-btn"
                   disabled={busy === r.name}
                   onClick={() => act('spawn', r.name)}
-                  title="Agent masuk lewat pintu utama dan berjalan ke mejanya"
+                  title="Tác tử đi vào qua cửa chính rồi đến bàn làm việc"
                 >
-                  {busy === r.name ? '…' : 'Spawn'}
+                  {busy === r.name ? '…' : 'Đưa vào văn phòng'}
                 </button>
               </div>
             ))}

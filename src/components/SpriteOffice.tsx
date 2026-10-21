@@ -1,7 +1,10 @@
 'use client'
 
-import { useEffect, useRef } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
+import { t as translate } from '@/lib/i18n'
+import { uiState } from './UiLabels'
 import type { Agent, Meeting, Task } from '@/types/hermes'
+import { officeAgents } from '@/lib/office/presentation'
 import { useOffice } from '@/lib/store'
 import { columnOf } from '@/lib/office/board'
 import { NIGHT_PALETTE, paletteFor } from '@/lib/office/layout'
@@ -675,7 +678,9 @@ function drawFrame(
 
 export default function SpriteOffice({ onSelect }: { onSelect: (name: string) => void }) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
-  const agents = useOffice((s) => s.agents)
+  const canonicalAgents = useOffice((s) => s.agents)
+  const avatars = useOffice((s) => s.avatars)
+  const agents = useMemo(() => officeAgents(canonicalAgents, avatars), [canonicalAgents, avatars])
   const tasks = useOffice((s) => s.tasks)
   const meeting = useOffice((s) => s.meeting)
   const selected = useOffice((s) => s.selectedAgent)
@@ -759,19 +764,19 @@ export default function SpriteOffice({ onSelect }: { onSelect: (name: string) =>
   }, [])
 
   return (
-    <div className="absolute inset-0 overflow-auto pt-14 vp-sprite-office" aria-label="Kantor pixel 2D">
+    <div className="absolute inset-0 overflow-auto pt-14 vp-sprite-office" aria-label="Văn phòng pixel 2D">
       <div className="vp-sprite-hud" aria-hidden="true">
-        <span>HERMES OFFICE</span><span>{agents.length} agent</span><span>{tasks.length} tugas</span><span>klik sprite untuk pilih</span>
+        <span>{translate("SpriteOffice.text2")}</span><span>{agents.length}{translate("SpriteOffice.text3")}</span><span>{tasks.length}{translate("SpriteOffice.text4")}</span><span>nhấp nhân vật để chọn</span>
       </div>
       <canvas
         ref={canvasRef}
         className="block pixel-office"
         role="img"
-        aria-label="Peta kantor isometrik: ruang rapat, area kerja, lounge, dan lobi sama seperti mode 3D. Klik karakter untuk memilih agent."
+        aria-label="Bản đồ văn phòng phối cảnh: phòng họp, khu làm việc, phòng nghỉ và sảnh giống chế độ 3D. Nhấp nhân vật để chọn tác tử."
       />
-      <div className="sr-only" aria-label="Pilih agent">
+      <div className="sr-only" aria-label="Chọn tác tử">
         {agents.map((agent) => (
-          <button key={agent.name} onClick={() => onSelect(agent.name)}>{agent.displayName}, {agent.status}</button>
+          <button key={agent.name} onClick={() => onSelect(agent.name)}>{agent.displayName}, {uiState(agent.status)}</button>
         ))}
       </div>
     </div>
