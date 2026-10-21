@@ -18,6 +18,7 @@ import KanbanModal from './KanbanModal'
 import DummySpawnDialog from './DummySpawnDialog'
 import OfficeNameDialog from './OfficeNameDialog'
 import { startPolling, useOffice } from '@/lib/store'
+import { t as translate } from '@/lib/i18n'
 import type { OfficeScene } from '@/lib/office/scene'
 import type { AgentDivision } from '@/types/hermes'
 
@@ -59,7 +60,19 @@ export default function OfficeApp() {
   const [spawnSlot, setSpawnSlot] = useState<{ avatarId: string; division: AgentDivision } | null>(null)
   const loadOffice = useOffice((s) => s.loadOffice)
 
-  useEffect(() => startPolling(), [])
+  const initFromUrl = useOffice((s) => s.initFromUrl)
+  const loadBoards = useOffice((s) => s.loadBoards)
+  // ?view / ?board / ?task first, so the first poll already reads the right board.
+  useEffect(() => {
+    initFromUrl({ view: true })
+    void loadBoards()
+    const stop = startPolling()
+    const b = setInterval(() => void loadBoards(), 30_000)
+    return () => {
+      stop()
+      clearInterval(b)
+    }
+  }, [initFromUrl, loadBoards])
 
   // Tinggi top bar TIDAK tetap: di layar sempit tombolnya pindah ke baris kedua, dan
   // angka status berubah panjang. Diukur langsung lalu diberikan ke CSS, supaya
@@ -186,7 +199,10 @@ export default function OfficeApp() {
             </div>
             <div className="vp-kv"><span>vai trò</span><b>{UI_ROLE_LABEL[a.role] ?? a.role}</b></div>
             <div className="vp-kv"><span>trạng thái</span><b>{uiState(a.status)}</b></div>
-            <div className="vp-kv"><span>công việc</span><b>{t?.title || '—'}</b></div>
+            <div className="vp-kv"><span>công việc</span><b>{t?.title || a.currentTaskTitle || '—'}</b></div>
+            {!t && a.currentTaskBoard && (
+              <div className="vp-kv"><span>{translate('Kanban.boardLabel')}</span><b>{a.currentTaskBoard}</b></div>
+            )}
           </aside>
         )
       })()}

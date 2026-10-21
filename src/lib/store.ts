@@ -5,13 +5,32 @@ import type { Agent, ArchivedMeeting, Meeting, Task } from '@/types/hermes'
 import type { AvatarDisplay, AvatarState } from './office/types'
 import type { Health } from './office/health'
 import type { CronPulse, WorkSignals, A2aPair } from './office/duty'
-import { fetchJson } from './api'
+import { fetchJson, setApiBoard } from './api'
+import { readUrlState, storeBoard, storedBoard, urlView, writeUrlParam } from './kanban-url'
+
+/** One Hermes board, as GET /api/hermes/boards returns it. */
+export type BoardInfo = {
+  slug: string
+  name: string
+  icon: string
+  color: string
+  description: string
+  total: number
+  counts: Record<string, number>
+  current: boolean
+}
 
 let displayRevision = 0
 
 const POLL_MS = Number(process.env.NEXT_PUBLIC_POLL_MS || 4000)
 
 type State = {
+  /** Hermes board on screen ('' until known = server default). */
+  board: string
+  boards: BoardInfo[]
+  /** What a request without ?board= reads (HERMES_KANBAN_BOARD or the CLI current board). */
+  defaultBoard: string
+  boardsError: string | null
   tasks: Task[]
   agents: Agent[]
   meeting: Meeting | null
@@ -49,6 +68,11 @@ type State = {
   work: WorkSignals
 
   load: () => Promise<void>
+  loadBoards: () => Promise<void>
+  /** Pick a board: URL + localStorage + every kanban API call. Never runs `boards switch`. */
+  setBoard: (slug: string) => void
+  /** Read ?board / ?view / ?task (and the stored board) once on mount. */
+  initFromUrl: (opts?: { view?: boolean }) => void
   /** Baca sinyal kerja. Gagal = tidak ada sinyal, bukan sinyal lama (lihat badannya). */
   loadWork: () => Promise<void>
   /** Baca kesehatan. Terpisah dari load(), karena kegagalannya tidak boleh menjatuhkan kantor. */
@@ -66,7 +90,11 @@ type State = {
   refreshMeeting: () => Promise<void>
 }
 
-export const useOffice = create<State>((set) => ({
+export const useOffice = create<State>((set, get) => ({
+  board: '',
+  boards: [],
+  defaultBoard: '',
+  boardsError: null,
   tasks: [],
   agents: [],
   meeting: null,
@@ -125,9 +153,12 @@ export const useOffice = create<State>((set) => ({
   },
 
   async load() {
+    const board = get().board
     const res = await fetchJson<{ tasks?: Task[]; agents?: Agent[] }>('/api/hermes/tasks', {
       cache: 'no-store',
     })
+    // The user switched boards while this poll was in flight: its rows belong to the old one.
+    if (get().board !== board) return
     if (!res.ok || !res.data) {
       set({ error: res.error || 'Không thể tải bảng', loading: false })
       return
@@ -210,15 +241,61 @@ export const useOffice = create<State>((set) => ({
     })
   },
 
-  setView: (view) => set({ view }),
+  async loadBoards() {
+    const res = await fetchJson<{ boards?: BoardInfo[]; defaultBoard?: string }>('/api/hermes/boards', { cache: 'no-store' })
+    if (!res.ok || !res.data) {
+      set({ boardsError: res.error || 'Không đọc được danh sách bảng' })
+      return
+    }
+    const boards = res.data.boards || []
+    const defaultBoard = res.data.defaultBoard || ''
+    set({ boards, defaultBoard, boardsError: null })
+    // A stored/linked board that no longer exists falls back to the default instead of 404ing every poll.
+    const cur = get().board
+    if (cur && boards.length && !boards.some((b) => b.slug === cur)) get().setBoard('')
+  },
+
+  setBoard(slug) {
+    const board = slug && slug === get().defaultBoard ? '' : slug
+    if (board === get().board) return
+    setApiBoard(board)
+    storeBoard(board)
+    writeUrlParam('board', board || null)
+    writeUrlParam('task', null)
+    set({ board, tasks: [], openTaskId: null, loading: true })
+    void get().load()
+  },
+
+  initFromUrl(opts = {}) {
+    const u = readUrlState()
+    const board = u.board ?? storedBoard() ?? ''
+    setApiBoard(board)
+    if (board) writeUrlParam('board', board)
+    set({
+      board,
+      ...(opts.view && u.view ? { view: u.view } : {}),
+      ...(u.task ? { openTaskId: u.task } : {}),
+    })
+  },
+
+  setView: (view) => {
+    writeUrlParam('view', view === '3d' ? null : urlView(view))
+    set({ view })
+  },
   setPeek: (peekDesk) => set({ peekDesk }),
-  openTask: (openTaskId) => set({ openTaskId }),
+  openTask: (openTaskId) => {
+    writeUrlParam('task', openTaskId)
+    set({ openTaskId })
+  },
   select: (selectedAgent) => set({ selectedAgent }),
   setNewTaskOpen: (newTaskOpen) => set({ newTaskOpen }),
 }))
 
-/** Poll the board; returns a stop function. */
-export function startPolling() {
+/**
+ * Poll the board; returns a stop function. `kanbanOnly` (the /kanban page) polls just the
+ * tasks — no meeting/office/health/work reads, no 3D scene.
+ */
+export function startPolling(opts: { kanbanOnly?: boolean } = {}) {
   let stopped = false
   let running = false
   let timer: ReturnType<typeof setTimeout> | undefined
@@ -227,7 +304,7 @@ export function startPolling() {
     if (document.hidden) return schedule()
     running = true
     try {
-      await Promise.all([
+      await Promise.all(opts.kanbanOnly ? [useOffice.getState().load()] : [
         useOffice.getState().load(),
         useOffice.getState().refreshMeeting(),
         useOffice.getState().loadOffice(),

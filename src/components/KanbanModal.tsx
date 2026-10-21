@@ -42,7 +42,7 @@ export default function KanbanModal({ onClose }: { onClose: () => void }) {
           </button>
         </header>
         <div className="vp-kanban-scroll">
-          <KanbanColumns search freshness closeAfterOpen={onClose} />
+          <KanbanColumns search freshness boards closeAfterOpen={onClose} />
         </div>
       </div>
     </div>

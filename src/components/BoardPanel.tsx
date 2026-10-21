@@ -29,6 +29,7 @@ import { useCallback, useEffect, useState } from 'react'
 import FullPanel from './FullPanel'
 import { UI_ACTION_LABEL, uiState } from './UiLabels'
 import KanbanColumns from './KanbanColumns'
+import { boardUrl } from '@/lib/api'
 import { useOffice } from '@/lib/store'
 
 type BlockReason = {
@@ -77,8 +78,8 @@ export default function BoardPanel({ open, onClose }: { open: boolean; onClose: 
   const load = useCallback(async () => {
     try {
       const [b, c] = await Promise.all([
-        fetch('/api/hermes/board', { cache: 'no-store' }).then((r) => r.json()),
-        fetch('/api/hermes/control', { cache: 'no-store' }).then((r) => r.json()),
+        fetch(boardUrl('/api/hermes/board'), { cache: 'no-store' }).then((r) => r.json()),
+        fetch(boardUrl('/api/hermes/control'), { cache: 'no-store' }).then((r) => r.json()),
       ])
       if (b?.error) throw new Error(b.error.message)
       setData(b)
@@ -103,7 +104,7 @@ export default function BoardPanel({ open, onClose }: { open: boolean; onClose: 
       setBusy(true)
       setNotice(null)
       try {
-        const res = await fetch('/api/hermes/control', {
+        const res = await fetch(boardUrl('/api/hermes/control'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ action, taskId, reason: why, steer }),

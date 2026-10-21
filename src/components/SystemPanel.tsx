@@ -24,6 +24,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import FullPanel from './FullPanel'
 import { useOffice } from '@/lib/store'
+import { boardUrl } from '@/lib/api'
 
 type UsageRow = {
   model: string
@@ -147,7 +148,7 @@ export default function SystemPanel({ open, onClose }: { open: boolean; onClose:
   // boleh menahan angka biaya dan error yang sudah siap.
   const loadApprovals = useCallback(async () => {
     try {
-      const res = await fetch('/api/hermes/approvals', { cache: 'no-store' })
+      const res = await fetch(boardUrl('/api/hermes/approvals'), { cache: 'no-store' })
       const json = await res.json()
       if (!res.ok) throw new Error(json?.error?.message || 'không đọc được trạng thái phê duyệt')
       setAppr(json)

@@ -93,7 +93,7 @@ export async function fetchJson<T = unknown>(
   init?: RequestInit,
 ): Promise<ApiResult<T>> {
   try {
-    const r = await fetch(input, init)
+    const r = await fetch(boardUrl(input), init)
     return await readJson<T>(r)
   } catch (e) {
     // Network-level failure: the request never got a reply.
@@ -104,4 +104,27 @@ export async function fetchJson<T = unknown>(
       error: `Không thể kết nối máy chủ: ${(e as Error).message}`,
     }
   }
+}
+
+/* ------------------------------------------------------------ kanban board -- */
+
+/**
+ * The Hermes board the UI is looking at ('' = server default). Set by the store when the
+ * user picks a board; every kanban API path then carries `?board=<slug>` so reads and
+ * writes (and their audit lines) hit the same board. `/api/hermes/boards` is not scoped.
+ */
+let apiBoard = ''
+const KANBAN_API = /^\/api\/hermes\/(tasks|board|approvals|control)(\/|\?|$)/
+
+export function setApiBoard(board: string): void {
+  apiBoard = board
+}
+
+export function getApiBoard(): string {
+  return apiBoard
+}
+
+export function boardUrl(input: string, board: string = apiBoard): string {
+  if (!board || !KANBAN_API.test(input) || /[?&]board=/.test(input)) return input
+  return `${input}${input.includes('?') ? '&' : '?'}board=${encodeURIComponent(board)}`
 }

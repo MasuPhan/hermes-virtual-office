@@ -31,7 +31,16 @@ export default function PeekPanel() {
   const [note, setNote] = useState<string | null>(null)
 
   const agent: Agent | undefined = agents.find((a) => a.deskIndex === desk)
-  const task: Task | undefined = tasks.find((t) => t.id === agent?.currentTaskId)
+  // Avatars take their status from every board, so the agent's card may live on another
+  // board than the one on screen: fall back to what the server told us about it.
+  const task: Task | undefined =
+    tasks.find((t) => t.id === agent?.currentTaskId) ??
+    (agent?.currentTaskId
+      ? ({ id: agent.currentTaskId, title: agent.currentTaskTitle || agent.currentTaskId, board: agent.currentTaskBoard } as Task)
+      : undefined)
+  const taskUrl = task
+    ? `/api/hermes/tasks/${task.id}${task.board ? `?board=${encodeURIComponent(task.board)}` : ''}`
+    : ''
 
   useEffect(() => {
     if (!task) {
@@ -44,7 +53,7 @@ export default function PeekPanel() {
       // Polls every 5 s: a dropped packet must leave the last known log on screen
       // rather than clearing it or flashing an error.
       const res = await fetchJson<{ log?: string; runs?: RunInfo[] }>(
-        `/api/hermes/tasks/${task.id}`,
+        taskUrl,
         { cache: 'no-store' },
       )
       if (!alive || !res.ok || !res.data) return
@@ -57,7 +66,7 @@ export default function PeekPanel() {
       alive = false
       clearInterval(id)
     }
-  }, [task?.id])
+  }, [task?.id, taskUrl])
 
   if (desk == null) return null
 
@@ -66,7 +75,7 @@ export default function PeekPanel() {
     setBusy(true)
     setNote(null)
     try {
-      const res = await fetchJson(`/api/hermes/tasks/${task.id}`, {
+      const res = await fetchJson(taskUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action, message: msg }),
@@ -99,7 +108,7 @@ export default function PeekPanel() {
           <div className="vp-kv">
             <span>công việc</span><b>{task?.title || '— không có việc đang chạy —'}</b>
           </div>
-          {task && <code className="vp-code-block">{task.id}</code>}
+          {task && <code className="vp-code-block">{task.id}{task.board ? ` · ${task.board}` : ''}</code>}
 
           {task && (
             <>

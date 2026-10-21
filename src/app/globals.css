@@ -503,22 +503,126 @@ button.vp-run:hover { border-left-color: var(--accent); background: #2efcff0a; }
   margin-bottom: 10px;
 }
 .vp-kanban-tools .vp-sub { margin: 2px 0 0; }
+.vp-kanban-fresh { min-width: 0; flex: 1 1 320px; }
+.vp-kanban-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-left: auto; }
+.vp-kanban-actions .vp-kanban-search { margin-left: 0; }
+.vp-kanban-max { text-decoration: none; }
+.vp-k2d-empty { padding: 4px 4px 10px; font-size: 12px; }
+
+/* Bộ chọn bảng (A2). */
+.vp-board-switch { position: relative; }
+.vp-board-switch-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 320px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: #08021ccc;
+  border: 1px solid var(--line-accent);
+  color: var(--text);
+  font: 600 12px/1.2 var(--font-title);
+  cursor: pointer;
+}
+.vp-board-switch-btn:hover, .vp-board-switch-btn[aria-expanded='true'] { border-color: var(--accent); }
+.vp-board-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vp-board-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); flex: none; }
+.vp-board-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 40;
+  width: min(340px, 86vw);
+  max-height: 60vh;
+  overflow-y: auto;
+  padding: 6px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  box-shadow: var(--shadow-card);
+  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(16px);
+}
+.vp-board-menu-note { padding: 8px 10px; font-size: 12px; }
+.vp-board-opt {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+.vp-board-opt:hover { background: #ffffff0a; }
+.vp-board-opt.on { border-color: var(--line-accent); background: #2efcff0d; }
+.vp-board-opt-main { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.vp-board-opt-main .vp-board-name { font: 600 12.5px/1.3 var(--font-title); }
+.vp-board-opt-sub { font: 500 10px/1.4 var(--font-code); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Tab cột trên HP (A3): ẩn ở desktop. */
+.vp-col-tabs { display: none; }
+
+/* Chi tiết công việc = ngăn kéo bên phải, trên mọi panel khác. */
+.vp-panel.vp-drawer { z-index: calc(var(--z-side) + 2); width: min(460px, 44vw); }
+
+/* /kanban toàn màn hình (A3): không cảnh 3D. */
+.vp-kpage { position: fixed; inset: 0; display: flex; flex-direction: column; background: var(--bg); }
+.vp-kpage-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--line);
+  background: #08021ce0;
+}
+.vp-kpage-head h1 { margin: 0; font: 700 15px/1.3 var(--font-title); color: var(--heading); white-space: nowrap; }
+.vp-kpage-stat { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.vp-kpage-back { margin-left: auto; text-decoration: none; white-space: nowrap; }
+.vp-kpage-body { position: relative; flex: 1; min-height: 0; overflow: auto; padding: 14px 16px; }
+.vp-kpage .vp-panel { top: 64px; }
 /* Papan (top bar): kanban di atas, lebar penuh; kolomnya butuh ±1050px, jadi panel
    slate yang biasanya max-w-3xl dilebarkan dan kolom digulir ke samping di dalamnya. */
 .vp-full-slate.vp-board-wide { max-width: min(1400px, 96vw); }
 .vp-board-kanban { overflow-x: auto; padding-bottom: 6px; }
 
 /* ------------------------------------------------------------------- 2d -- */
+.vp-k2d-grid {
+  /* KanbanColumns đặt --vp-cols: cột có việc minmax(200px,1fr), cột trống là dải 52px. */
+  grid-template-columns: var(--vp-cols, repeat(7, minmax(200px, 1fr)));
+  min-width: var(--vp-minw, 1050px);
+  align-items: start;
+}
 .vp-col {
   background: linear-gradient(165deg, #38099533, #1103378c);
   border: 1px solid var(--line);
   border-radius: 20px;
   padding: 8px;
   min-height: 260px;
+  min-width: 0;
 }
+/* Cột trống: dải hẹp, nhãn dọc; bấm để hiện lại các cột trống. */
+.vp-col-collapsed { padding: 8px 4px; cursor: pointer; align-self: stretch; }
+.vp-col-collapsed:hover { border-color: var(--line-hover); }
+.vp-col-collapsed .vp-col-head {
+  writing-mode: vertical-rl;
+  flex-direction: row;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  padding: 4px 0;
+  margin: 0 auto;
+  color: var(--muted);
+}
+.vp-col-collapsed .vp-col-body { display: none; }
+.vp-col-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .vp-col-head {
   display: flex;
   justify-content: space-between;
+  gap: 6px;
   font: 600 10px/1.3 var(--font-code);
   letter-spacing: 0.12em;
   color: var(--accent);
@@ -531,18 +635,53 @@ button.vp-run:hover { border-left-color: var(--accent); background: #2efcff0a; }
   border-radius: 12px;
   padding: 8px 10px;
   cursor: pointer;
+  /* Audit A1: grid/flex children default to min-width:auto, so one long URL or agent
+     name used to push the card past its column. Everything inside must be able to shrink. */
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
   transition: border-color 0.3s var(--ease), transform 0.3s var(--ease), box-shadow 0.3s var(--ease);
 }
 .vp-card:hover { border-color: var(--line-hover); transform: translateY(-2px); box-shadow: var(--glow-sm); }
-.vp-card-title { font-size: 12.5px; line-height: 1.35; }
+.vp-card.on { border-color: var(--accent); box-shadow: var(--glow-sm); }
+.vp-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.vp-card-title {
+  font-size: 12.5px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+  line-clamp: 4;
+  overflow: hidden;
+}
 .vp-card-meta {
   display: flex;
-  justify-content: space-between;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 6px;
+  gap: 4px 6px;
   margin-top: 6px;
   font-size: 10.5px;
   color: var(--muted);
+  min-width: 0;
+}
+.vp-card-meta > * {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.vp-card-meta .vp-chip-who { flex: 0 1 auto; }
+.vp-card-id {
+  display: block;
+  margin-top: 4px;
+  font: 500 10px/1.3 var(--font-code);
+  color: var(--dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .vp-chip {
   background: #2efcff12;
@@ -811,6 +950,45 @@ button.vp-run:hover { border-left-color: var(--accent); background: #2efcff0a; }
     grid-auto-columns: min(84vw, 320px);
   }
   .vp-k2d-grid > .vp-col { scroll-snap-align: start; }
+  /* HP: một cột mỗi màn hình, nên cột trống không thu thành dải — hiện "trống" như thường. */
+  .vp-col-collapsed { padding: 8px; cursor: default; }
+  .vp-col-collapsed .vp-col-head { writing-mode: horizontal-tb; justify-content: space-between; margin: 0; padding: 2px 4px 8px; color: var(--accent); }
+  .vp-col-collapsed .vp-col-body { display: flex; }
+  /* Tab cột: dính trên cùng, chỉ báo cột đang xem. */
+  .vp-col-tabs {
+    position: sticky;
+    top: -12px;
+    left: 0;
+    z-index: 5;
+    display: flex;
+    gap: 6px;
+    overflow-x: auto;
+    margin: 0 0 10px;
+    padding: 6px 0;
+    background: var(--bg);
+    scrollbar-width: none;
+  }
+  .vp-col-tabs button {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px;
+    border-radius: 999px;
+    border: 1px solid var(--line);
+    background: transparent;
+    color: var(--muted);
+    font: 600 10.5px/1.2 var(--font-code);
+    letter-spacing: 0.06em;
+  }
+  .vp-col-tabs button b { color: var(--text); }
+  .vp-col-tabs button.on { border-color: var(--accent); color: var(--accent); background: #2efcff12; }
+  .vp-panel.vp-drawer { width: auto; }
+  .vp-kpage-head { flex-wrap: wrap; padding-top: max(10px, env(safe-area-inset-top)); }
+  .vp-kpage-stat { order: 3; flex: 1 1 100%; }
+  .vp-kpage-body { padding: 12px; scroll-snap-type: x mandatory; }
+  .vp-kpage .vp-panel { top: 8px; }
+  .vp-kanban-actions { margin-left: 0; flex: 1 1 100%; }
 
   .vp-sprite-office { padding-bottom: env(safe-area-inset-bottom); }
   .vp-sprite-hud { flex-wrap: wrap; justify-content: center; width: auto; gap: 4px 10px; }
