@@ -305,14 +305,14 @@ function signTexture(text: string, sub?: string) {
   // ends of a 512 px canvas, and the plaque read as a gold smear rather than a room name.
   let size = 54
   while (size > 18) {
-    c.font = `bold ${size}px Georgia, serif`
+    c.font = `bold ${size}px 'Be Vietnam Pro', Inter, system-ui, sans-serif`
     if (c.measureText(text).width <= 452) break
     size -= 2
   }
   c.fillText(text, 256, sub ? 50 : 64)
   if (sub) {
     c.fillStyle = palCss('#a89a72')
-    c.font = '26px Georgia, serif'
+    c.font = "26px 'JetBrains Mono', ui-monospace, monospace"
     c.fillText(sub, 256, 94)
   }
   const tex = new THREE.CanvasTexture(cv)

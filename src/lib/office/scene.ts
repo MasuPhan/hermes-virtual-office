@@ -16,7 +16,7 @@
  * written back to the DB, so a reload puts everyone back where they were.
  */
 import * as THREE from 'three'
-import { ENV, FOG, RENDER, SKY } from './palette'
+import { ENV, FOG, GLOW, RENDER, SKY } from './palette'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { CSS2DRenderer, CSS2DObject } from 'three/examples/jsm/renderers/CSS2DRenderer.js'
 
@@ -206,6 +206,40 @@ function skyGradientTexture(stops: readonly string[] = SKY.day): THREE.Texture {
   return t
 }
 
+/** Night sky: one Points draw call on the upper hemisphere; unaffected by fog. */
+function starField(): THREE.Points {
+  const { count, size, radius, color } = SKY.stars
+  const pos = new Float32Array(count * 3)
+  let seed = 7
+  const rand = () => {
+    seed = (seed * 1664525 + 1013904223) >>> 0
+    return seed / 4294967296
+  }
+  for (let i = 0; i < count; i++) {
+    const y = 0.06 + rand() * 0.94
+    const ring = Math.sqrt(1 - y * y)
+    const a = rand() * Math.PI * 2
+    pos[i * 3] = Math.cos(a) * ring * radius
+    pos[i * 3 + 1] = y * radius
+    pos[i * 3 + 2] = Math.sin(a) * ring * radius
+  }
+  const geo = new THREE.BufferGeometry()
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3))
+  const mat = new THREE.PointsMaterial({
+    color,
+    size,
+    sizeAttenuation: false,
+    fog: false,
+    transparent: true,
+    opacity: 0.85,
+    depthWrite: false,
+  })
+  const pts = new THREE.Points(geo, mat)
+  pts.name = 'night-stars'
+  pts.frustumCulled = false
+  return pts
+}
+
 function envContrastTexture(): THREE.Texture {
   const c = document.createElement('canvas')
   c.width = 512
@@ -264,6 +298,9 @@ export function createScene(
   pmrem.dispose()
   scene.background = skyGradientTexture()
   scene.fog = new THREE.Fog(FOG.day, FOG.near, FOG.far)
+  const stars = starField()
+  stars.visible = false
+  scene.add(stars)
 
   let hour = Number(
     new Intl.DateTimeFormat('en-GB', { hour: '2-digit', hour12: false, timeZone: 'Asia/Jakarta' })
@@ -1171,7 +1208,7 @@ export function createScene(
       if (a.data.deskIndex != null && office.monitors[a.data.deskIndex]) {
         const mat = office.monitors[a.data.deskIndex].material as THREE.MeshStandardMaterial
         const st = a.data.status
-        const target = st === 'working' ? 1.9 : st === 'review' ? 1.35 : 0.55
+        const target = st === 'working' ? GLOW.monitor.working : st === 'review' ? GLOW.monitor.review : GLOW.monitor.ei
         mat.emissiveIntensity += (target - mat.emissiveIntensity) * Math.min(1, dt * 4)
       }
 
@@ -1313,6 +1350,7 @@ export function createScene(
     office.applyPalette(h)
     scene.background = h >= 18 || h < 6 ? skyNight : skyDay
     scene.fog = new THREE.Fog(h >= 18 || h < 6 ? FOG.night : FOG.day, FOG.near, FOG.far)
+    stars.visible = h >= 18 || h < 6
   }
   setHour(hour)
 
@@ -1334,6 +1372,8 @@ export function createScene(
   function dispose() {
     stop()
     controls.dispose()
+    stars.geometry.dispose()
+    ;(stars.material as THREE.Material).dispose()
     renderer.domElement.removeEventListener('mousedown', onDown)
     renderer.domElement.removeEventListener('mouseup', onUp)
     renderer.dispose()
