@@ -135,8 +135,22 @@ async function main() {
     calls.length = 0
     await GET(new Request('http://127.0.0.1:3131/api/hermes/tasks?board=default', { headers: { host: '127.0.0.1:3131' } }) as never)
     check('second poll within TTL: no extra per-board lists', calls.filter((c) => c.includes('list') && !c.includes('boards') && !c.includes('--archived')).length === 0, calls.map((c) => c.join(' ')).join(' | '))
+    check('second poll within TTL: other boards\' card details not re-read', calls.filter((c) => c.includes('show') && (c.includes('proj-a') || c.includes('proj-b'))).length === 0, calls.map((c) => c.join(' ')).join(' | '))
     const r404 = await GET(new Request('http://127.0.0.1:3131/api/hermes/tasks?board=zzz', { headers: { host: '127.0.0.1:3131' } }) as never)
     check('GET ?board=zzz → 404', r404.status === 404)
+
+    console.log('\n=== 5b. avatar precedence')
+    const mk = (id: string, status: string, board: string, assignee = 'dave') => ({ id, title: id, status, board, assignee, priority: 0 }) as never
+    const pick = kanban.activeTaskByAssignee([mk('t_r1', 'review', 'default'), mk('t_r2', 'running', 'proj-a')])
+    check('running on another board beats review on this one', pick.get('dave')?.id === 't_r2')
+    const pick2 = kanban.activeTaskByAssignee([mk('t_s1', 'running', 'default'), mk('t_s2', 'running', 'proj-a')])
+    check('tie across boards: the board on screen keeps the avatar', pick2.get('dave')?.id === 't_s1')
+    const pick3 = kanban.activeTaskByAssignee([mk('t_u1', 'running', 'default'), mk('t_u2', 'running', 'default')])
+    check('tie on one board: later row wins (unchanged)', pick3.get('dave')?.id === 't_u2')
+    const agents2 = await kanban.listAgents([mk('t_v1', 'running', 'proj-b', 'erin')], [])
+    check('agent busy only on another board still gets an avatar', agents2.some((x) => x.name === 'erin' && x.status === 'working' && x.currentTaskBoard === 'proj-b'), JSON.stringify(agents2.map((x) => x.name)))
+    const agents3 = await kanban.listAgents([mk('t_v2', 'running', 'proj-b', '../evil')], [])
+    check('unsafe assignee from a card is not turned into an avatar', !agents3.some((x) => x.name.includes('evil')))
 
     console.log('\n=== 6. audit carries the board')
     await scope.withBoardScope('proj-a', async () => audit.beginAudit({ at: new Date().toISOString(), action: 'steer', taskId: 't_000000a1', effect: 'x' }).finish('ok', true))

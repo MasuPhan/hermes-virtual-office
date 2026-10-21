@@ -24,7 +24,7 @@ import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import type { Task } from '@/types/hermes'
 import { readBoard, type BoardReadout } from './board'
-import { activeTaskByAssignee, getTaskDetail } from './kanban'
+import { activeTaskByAssignee, getTaskDetail, isOtherBoardRow } from './kanban'
 import { fleetRootEnv } from './root'
 import { errorTail } from './redact'
 
@@ -237,10 +237,27 @@ export function readApprovalQueue(tasks: Task[], detail: Map<string, { events: E
  * assignee — tiap `kanban show` satu proses Python, dan task lain tidak bisa membuat agent mana
  * pun berhenti. Dipakai route `agents` dan `tasks` (yang terakhir itu yang memberi makan avatar).
  */
+/**
+ * Detail for an avatar's card on ANOTHER board: held 10 s (the same window as the other
+ * boards' task lists), so the all-board avatar status costs one `show` per such agent per
+ * 10 s instead of one per 4 s poll. The board on screen keeps the normal 3 s read cache.
+ */
+const OTHER_DETAIL_TTL_MS = 10_000
+const otherDetail = new Map<string, { at: number; d: Awaited<ReturnType<typeof getTaskDetail>> }>()
+async function otherBoardDetail(t: Task) {
+  const key = `${t.board ?? ''}:${t.id}`
+  const hit = otherDetail.get(key)
+  if (hit && Date.now() - hit.at < OTHER_DETAIL_TTL_MS) return hit.d
+  const d = await getTaskDetail(t.id, t.board)
+  if (otherDetail.size > 200) otherDetail.clear()
+  otherDetail.set(key, { at: Date.now(), d })
+  return d
+}
+
 export async function blockedAssigneesFor(tasks: Task[]): Promise<Set<string>> {
   const active = [...activeTaskByAssignee(tasks).values()]
   // `t.board`: with all-board aggregation an active task may live on another board.
-  const details = await Promise.all(active.map((t) => getTaskDetail(t.id, t.board)))
+  const details = await Promise.all(active.map((t) => (isOtherBoardRow(t) ? otherBoardDetail(t) : getTaskDetail(t.id, t.board))))
   const detail = new Map(active.map((t, i) => [t.id, { events: details[i]?.events || [] }]))
   return readApprovalQueue(active, detail).blockedAgentIds
 }

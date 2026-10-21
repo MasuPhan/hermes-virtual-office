@@ -1191,9 +1191,16 @@ async function readSoul(name: string): Promise<string | null> {
  */
 export function activeTaskByAssignee(tasks: Task[]): Map<string, Task> {
   const active = new Map<string, Task>()
+  const rank = (t: Task) => (t.status === 'running' ? 2 : t.status === 'review' ? 1 : 0)
   for (const t of tasks) {
-    if (!t.assignee) continue
-    if (t.status === 'running' || t.status === 'review') active.set(t.assignee, t)
+    if (!t.assignee || !rank(t)) continue
+    const prev = active.get(t.assignee)
+    // Running beats review. On a tie the later row wins only within the same board (the
+    // single-board behaviour as before); across boards the earlier one — the board on
+    // screen, which activeTasksAllBoards lists first — keeps the avatar.
+    if (!prev || rank(t) > rank(prev) || (rank(t) === rank(prev) && (prev.board ?? '') === (t.board ?? ''))) {
+      active.set(t.assignee, t)
+    }
   }
   return active
 }
@@ -1208,7 +1215,13 @@ export async function listAgents(
   // Profiles AND assignees. Reading only `assignees` meant a freshly created
   // profile stayed invisible until it was given a task, so "create a profile"
   // looked like it had done nothing.
-  const names = [...new Set([...raw.map((r) => r.name), ...(await listProfiles())])].sort()
+  // + whoever holds a running/review card on ANY board (all-board avatar status): an agent
+  // busy only on another board must still get a desk. Names the office would refuse are skipped.
+  const busyNames = tasks
+    .filter((t) => t.assignee && (t.status === 'running' || t.status === 'review'))
+    .map((t) => t.assignee as string)
+    .filter((n) => /^[a-z0-9][a-z0-9_-]{0,63}$/.test(n))
+  const names = [...new Set([...raw.map((r) => r.name), ...(await listProfiles()), ...busyNames])].sort()
 
   const active = activeTaskByAssignee(tasks)
 
@@ -1667,6 +1680,12 @@ export function defaultBoardSlug(boards: BoardInfo[]): string {
 const ACTIVE_TTL_MS = 10_000
 let activeMemo: { at: number; key: string; data: Task[] } | null = null
 
+/** Rows that came from a board other than the one on screen (see activeTasksAllBoards). */
+const OTHER_BOARD_ROWS = new WeakSet<Task>()
+export function isOtherBoardRow(t: Task): boolean {
+  return OTHER_BOARD_ROWS.has(t)
+}
+
 export async function activeTasksAllBoards(selected: Task[], selectedBoard: string): Promise<Task[]> {
   const busy = (t: Task) => t.status === 'running' || t.status === 'review'
   const own = selected.filter(busy)
@@ -1685,7 +1704,11 @@ export async function activeTasksAllBoards(selected: Task[], selectedBoard: stri
   } else {
     const lists = await Promise.all(others.map((b) => listTasks({ board: b }).catch(() => [] as Task[])))
     rest = lists.flat().filter(busy)
+    for (const t of rest) OTHER_BOARD_ROWS.add(t)
     activeMemo = { at: Date.now(), key, data: rest }
   }
-  return [...own.map((t) => (t.board ? t : { ...t, board: sel })), ...rest]
+  // Rows of the board on screen keep whatever board listTasks gave them: when it is the
+  // unscoped default they stay board-less, so their `show` calls share the read cache with
+  // the rest of the office instead of a second `--board default` copy.
+  return [...own, ...rest]
 }
