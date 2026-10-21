@@ -135,6 +135,7 @@ export default function OfficeApp() {
       {/* ------------------------------------------------------- top bar */}
       <header ref={barRef} className="vp-topbar">
         <div className="vp-topbar-brand flex items-center gap-3">
+          <img className="vp-logo-img" src="/oxmode-logo.png" alt="OXMODE" width={126} height={18} />
           <span className="vp-logo">Hermes Office</span>
           <span className={`vp-dot ${backendOnline ? 'ok' : 'bad'}`} />
           <span className="vp-muted vp-topbar-status">
