@@ -7,6 +7,7 @@ import { UI_ROLE_LABEL, uiState } from './UiLabels'
 import ModelPicker, { type ModelChoice } from './ModelPicker'
 import type { Task } from '@/types/hermes'
 import { fetchJson } from '@/lib/api'
+import { t as translate } from '@/lib/i18n'
 import type { EvidenceItem, EvidenceVerdict } from '@/lib/hermes/evidence'
 import type { VerificationReading } from '@/lib/hermes/verification'
 
@@ -199,10 +200,20 @@ export default function TaskPanel() {
     setNote(null)
   }, [taskId, task?.model])
 
+  // Drawer: Esc closes it (and clears ?task= in the URL via openTask).
+  useEffect(() => {
+    if (!taskId) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !(e.target as HTMLElement)?.closest?.('input,textarea,select')) openTask(null)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [taskId, openTask])
+
   if (!taskId) return null
 
-  /** run | promote | set-model */
-  async function act(action: 'run' | 'promote' | 'set-model', extra: Record<string, unknown> = {}) {
+  /** promote | set-model ('run' is disabled server-side, see A4 note below) */
+  async function act(action: 'promote' | 'set-model', extra: Record<string, unknown> = {}) {
     setBusy(true)
     setNote(null)
     try {
@@ -237,7 +248,7 @@ export default function TaskPanel() {
   const blocked = task?.status === 'blocked' || task?.status === 'scheduled'
 
   return (
-    <aside className="vp-panel left-0">
+    <aside className="vp-panel vp-drawer right-0" aria-label="Chi tiết công việc">
       <header className="vp-panel-head">
         <h2>Chi tiết công việc</h2>
         <button className="vp-x" onClick={() => openTask(null)} aria-label="Đóng">
@@ -309,32 +320,41 @@ export default function TaskPanel() {
                   })}
                 </div>
                 <div className="vp-muted">
-                  Công việc chỉ được chạy khi mọi điều kiện trên đã hoàn tất. Nút
-                  Chạy sẽ không khởi tạo tiến trình nếu còn điều kiện chưa hoàn tất.
+                  {translate('Kanban.parentsNote')}
                 </div>
               </>
             )}
 
-            {/* A `ready` task is not running on its own: the dispatcher that spawns
-                workers lives in the gateway. Without this button a task just sits
-                there whenever the gateway is down. It lifts a parked task first,
-                so one click covers blocked/scheduled too. */}
-            <div className="vp-sub">CHẠY</div>
-            <div className="flex gap-2">
+            {/* A4: "Chạy" used to POST action=run, which the server refuses (HVO-05): Hermes
+                only has `dispatch`, and that runs a pass over the WHOLE board — it cannot
+                target this card, so the office never fires it. The button stays visible
+                but disabled, with the reason, instead of a click that fails with 501.
+                Lifting a parked card (promote/unblock) is a sanctioned single-card write and
+                is offered behind a confirm. */}
+            <div className="vp-sub">{translate('Kanban.runHeading')}</div>
+            <div className="flex flex-wrap gap-2">
               <button
                 className="vp-btn"
-                disabled={busy || task.status === 'running' || task.status === 'review'}
-                onClick={() => act('run')}
-                title="Gỡ chặn nếu cần, sau đó yêu cầu bộ điều phối Hermes chạy công việc này"
+                disabled
+                aria-disabled="true"
+                aria-describedby="vp-run-why"
+                title={translate('Kanban.runDisabledWhy')}
               >
-                {busy ? '…' : 'Chạy'}
+                {translate('Kanban.runDisabled')}
               </button>
+              {blocked && (
+                <button
+                  className="vp-btn"
+                  disabled={busy}
+                  onClick={() => {
+                    if (window.confirm(translate('Kanban.unblockConfirm', { title: task.title }))) void act('promote')
+                  }}
+                >
+                  {busy ? '…' : translate('Kanban.unblock')}
+                </button>
+              )}
             </div>
-            {blocked && (
-              <div className="vp-muted">
-                Trạng thái <b>{uiState(task.status)}</b>: nút Chạy sẽ tự gỡ chặn trước.
-              </div>
-            )}
+            <div id="vp-run-why" className="vp-muted">{translate('Kanban.runDisabledWhy')}</div>
 
             <div className="vp-sub">MÔ HÌNH TÁC TỬ CHO VIỆC NÀY</div>
             <ModelPicker
