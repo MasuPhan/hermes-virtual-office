@@ -34,9 +34,12 @@
  * the mapping from an office agent to its session in the office's own data dir.
  */
 import { execFile } from 'node:child_process'
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { randomUUID } from 'node:crypto'
+import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { promisify } from 'node:util'
+import { fleetRootEnv } from './root'
+import { errorTail } from './redact'
 
 const run = promisify(execFile)
 
@@ -44,6 +47,24 @@ const HERMES_BIN = process.env.HERMES_BIN || 'hermes'
 /** Generous: an agent turn may run tools before answering. */
 const CHAT_TIMEOUT_MS = Number(process.env.CHAT_TIMEOUT_MS || 180_000)
 const DATA_DIR = process.env.DATA_DIR || path.join(process.cwd(), 'data')
+
+type ChatExec = (file: string, args: string[], options: { env?: NodeJS.ProcessEnv; timeout?: number; maxBuffer?: number }) => Promise<{ stdout: string; stderr: string }>
+let testExecutor: ChatExec | null = null
+
+/** In-memory subprocess seam for regression tests; production never uses it. */
+export function _setChatExecutorForTest(fn: ChatExec | null): void {
+  testExecutor = fn
+}
+
+async function exec(
+  file: string,
+  args: string[],
+  options: { env?: NodeJS.ProcessEnv; timeout?: number; maxBuffer?: number },
+): Promise<{ stdout: string; stderr: string }> {
+  if (testExecutor) return testExecutor(file, args, options)
+  const r = await run(file, args, options)
+  return { stdout: String(r.stdout), stderr: String(r.stderr) }
+}
 
 /**
  * Env without the agent-session markers.
@@ -53,7 +74,7 @@ const DATA_DIR = process.env.DATA_DIR || path.join(process.cwd(), 'data')
  * the same way the kanban bridge does.
  */
 function cleanEnv(): NodeJS.ProcessEnv {
-  const env = { ...process.env }
+  const env = fleetRootEnv(process.env)
   for (const k of [
     'HERMES_DELEGATED_CHILD_CONTEXT',
     'HERMES_SUPERVISED_CHILD',
@@ -90,7 +111,7 @@ export function officeChatArgs(profile: string, message: string, sessionId?: str
  */
 async function cli(args: string[], timeout = CHAT_TIMEOUT_MS): Promise<{ stdout: string; stderr: string }> {
   try {
-    const { stdout, stderr } = await run(HERMES_BIN, args, {
+    const { stdout, stderr } = await exec(HERMES_BIN, args, {
       env: cleanEnv(),
       timeout,
       maxBuffer: 8 * 1024 * 1024,
@@ -103,17 +124,17 @@ async function cli(args: string[], timeout = CHAT_TIMEOUT_MS): Promise<{ stdout:
       killed?: boolean
     }
     if (e.code === 'ENOENT') {
-      throw new Error(`Hermes CLI tidak ditemukan di "${HERMES_BIN}". Set HERMES_BIN.`)
+      throw new Error(`Không tìm thấy Hermes CLI tại "${HERMES_BIN}". Hãy đặt HERMES_BIN.`)
     }
     // A timeout still carries partial output; an answer may be in there.
     const partial = [e.stdout, e.stderr].filter(Boolean).join('\n').trim()
     if (e.killed || (err as Error).name === 'AbortError') {
       throw new Error(
-        `agent tidak menjawab dalam ${Math.round(timeout / 1000)} detik` +
-          (partial ? ` (keluaran sebagian: ${partial.slice(0, 200)})` : ''),
+        `Tác tử không trả lời trong ${Math.round(timeout / 1000)} giây` +
+          (partial ? ` (đầu ra một phần: ${errorTail({ stderr: partial }, 200)})` : ''),
       )
     }
-    throw new Error(`hermes chat gagal: ${(e.stderr || e.message || '').trim()}`)
+    throw new Error(`hermes chat thất bại: ${errorTail(e)}`)
   }
 }
 
@@ -175,8 +196,55 @@ async function readIndex(): Promise<Record<string, ChatSession>> {
 }
 
 async function writeIndex(index: Record<string, ChatSession>): Promise<void> {
-  await mkdir(path.dirname(storePath()), { recursive: true })
-  await writeFile(storePath(), JSON.stringify(index, null, 2), 'utf8')
+  const target = storePath()
+  await mkdir(path.dirname(target), { recursive: true })
+  // Atomic replace: a crash mid-write must not leave a truncated index that
+  // loses every agent's pointer. Write a sibling temp file then rename.
+  const tmp = `${target}.${process.pid}.${randomUUID()}.tmp`
+  try {
+    await writeFile(tmp, JSON.stringify(index, null, 2), { encoding: 'utf8', mode: 0o600 })
+    await rename(tmp, target)
+  } catch (err) {
+    try { await unlink(tmp) } catch { /* best effort */ }
+    throw err
+  }
+}
+
+/** Single-process transaction fence for the SHARED index. Model calls stay outside.
+ * Atomic rename alone cannot prevent two read/merge/write operations losing updates.
+ * All index mutations, including resets, must hold this short lock.
+ */
+let indexQueue: Promise<unknown> = Promise.resolve()
+function withIndexLock<T>(fn: () => Promise<T>): Promise<T> {
+  const next = indexQueue.catch(() => undefined).then(fn)
+  indexQueue = next.then(() => undefined, () => undefined)
+  return next
+}
+
+/**
+ * Serialize turns for the SAME agent. Different agents may run concurrently;
+ * their index merges must still be based on the latest file, not a snapshot
+ * taken before the model call (HVO-09).
+ */
+const agentQueues = new Map<string, Promise<unknown>>()
+
+function withAgentLock<T>(agent: string, fn: () => Promise<T>): Promise<T> {
+  const key = agent.trim().toLowerCase()
+  const prev = agentQueues.get(key) ?? Promise.resolve()
+  const runNext = prev.catch(() => undefined).then(fn)
+  agentQueues.set(key, runNext)
+  // Drop the queue entry once this turn is the tail, so the map cannot grow
+  // forever in a long-lived server process.
+  const cleanup = () => {
+    if (agentQueues.get(key) === runNext) agentQueues.delete(key)
+  }
+  void runNext.then(cleanup, cleanup)
+  return runNext
+}
+
+/** Exposed for tests: no live model call is ever made by a regression test. */
+export function _chatQueueSizeForTest(): number {
+  return agentQueues.size
 }
 
 /** Every known thread, newest activity first. */
@@ -256,56 +324,63 @@ export async function sendChatMessage(
   message: string,
 ): Promise<SendResult> {
   const text = message.trim()
-  if (!text) throw new Error('pesan kosong')
-
-  const index = await readIndex()
-  const existing = index[agent]
-
-  // `--query-file -` would be safer for arbitrary text, but the query is passed as an
-  // argv entry, not through a shell, so quotes and $() are already preserved
-  // verbatim. argv has a length limit (~128 KB); a longer message is refused rather
-  // than silently truncated.
+  if (!text) throw new Error('Tin nhắn trống')
   if (text.length > 60_000) {
-    throw new Error('pesan terlalu panjang (maks 60.000 karakter)')
+    throw new Error('Tin nhắn quá dài (tối đa 60.000 ký tự)')
   }
 
-  const args = officeChatArgs(profile, text, existing?.id)
+  // One turn at a time per agent: two tabs cannot resume the same session
+  // concurrently. Other agents keep running in parallel.
+  return withAgentLock(agent, async () => {
+    // Snapshot only to decide whether this turn resumes; the authoritative read
+    // happens again after the model call, under the same agent lock.
+    const before = await readIndex()
+    const existing = before[agent]
+    const args = officeChatArgs(profile, text, existing?.id)
 
-  inFlight.set(agent, (inFlight.get(agent) ?? 0) + 1)
-  let out: { stdout: string; stderr: string }
-  try {
-    out = await cli(args)
-  } finally {
-    const n = (inFlight.get(agent) ?? 1) - 1
-    if (n > 0) inFlight.set(agent, n)
-    else inFlight.delete(agent)
-  }
-  const { stdout, stderr } = out
-  const reply = cleanReply(stdout)
-  // The session line arrives on stderr; the answer on stdout. Search both so a
-  // future CLI version moving the line does not break this again.
-  const id = SESSION_RE.exec(stderr)?.[1] || SESSION_RE.exec(stdout)?.[1] || existing?.id
-  if (!id) {
-    const where = `${stdout}\n${stderr}`.trim().slice(0, 300)
-    throw new Error(`tidak bisa membaca session_id dari keluaran CLI: ${where}`)
-  }
+    inFlight.set(agent, (inFlight.get(agent) ?? 0) + 1)
+    let out: { stdout: string; stderr: string }
+    try {
+      out = await cli(args)
+    } finally {
+      const n = (inFlight.get(agent) ?? 1) - 1
+      if (n > 0) inFlight.set(agent, n)
+      else inFlight.delete(agent)
+    }
+    const { stdout, stderr } = out
+    const reply = cleanReply(stdout)
+    // The session line arrives on stderr; the answer on stdout. Search both so a
+    // future CLI version moving the line does not break this again.
+    const id = SESSION_RE.exec(stderr)?.[1] || SESSION_RE.exec(stdout)?.[1] || existing?.id
+    if (!id) {
+      const where = errorTail({ stderr: `${stdout}\n${stderr}`.trim() }, 300)
+      throw new Error(`Không thể đọc session_id từ đầu ra CLI: ${where}`)
+    }
 
-  const now = new Date().toISOString()
-  const session: ChatSession = {
-    id,
-    agent,
-    profile,
-    // The CLI names a session from its first message; mirror that so the thread list
-    // reads like a chat app rather than a list of opaque ids.
-    title: existing?.title || text.slice(0, 60),
-    createdAt: existing?.createdAt || now,
-    updatedAt: now,
-    messageCount: (existing?.messageCount ?? 0) + 2,
-  }
-  index[agent] = session
-  await writeIndex(index)
+    const now = new Date().toISOString()
+    // Re-read the LATEST index after the turn and merge only THIS agent's entry.
+    // Writing the pre-turn snapshot would erase pointers created concurrently by
+    // other agents.
+    return withIndexLock(async () => {
+    const latest = await readIndex()
+    const prior = latest[agent] ?? existing
+    const session: ChatSession = {
+      id,
+      agent,
+      profile,
+      // The CLI names a session from its first message; mirror that so the thread list
+      // reads like a chat app rather than a list of opaque ids.
+      title: prior?.title || text.slice(0, 60),
+      createdAt: prior?.createdAt || now,
+      updatedAt: now,
+      messageCount: (prior?.messageCount ?? 0) + 2,
+    }
+    latest[agent] = session
+    await writeIndex(latest)
 
-  return { session, reply }
+    return { session, reply }
+    })
+  })
 }
 
 /* ------------------------------------------------------------------- history -- */
@@ -369,7 +444,9 @@ export async function readChatHistory(
 
 /** Forget an agent's thread pointer. The history stays in Hermes' store. */
 export async function resetChatSession(agent: string): Promise<void> {
-  const index = await readIndex()
-  delete index[agent]
-  await writeIndex(index)
+  return withAgentLock(agent, () => withIndexLock(async () => {
+    const index = await readIndex()
+    delete index[agent]
+    await writeIndex(index)
+  }))
 }
