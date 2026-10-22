@@ -1205,6 +1205,17 @@ export function activeTaskByAssignee(tasks: Task[]): Map<string, Task> {
   return active
 }
 
+/** Whether an assignee may become an avatar (strict profile-name rules; never throws). */
+export function isAvatarName(name: unknown): name is string {
+  if (typeof name !== 'string') return false
+  try {
+    validateProfileName(name, { allowDefault: true })
+    return true
+  } catch {
+    return false
+  }
+}
+
 export async function listAgents(
   tasks: Task[],
   prefetchedAssignees?: { name: string; onDisk: boolean; total: number }[],
@@ -1221,7 +1232,13 @@ export async function listAgents(
     .filter((t) => t.assignee && (t.status === 'running' || t.status === 'review'))
     .map((t) => t.assignee as string)
     .filter((n) => /^[a-z0-9][a-z0-9_-]{0,63}$/.test(n))
-  const names = [...new Set([...raw.map((r) => r.name), ...(await listProfiles()), ...busyNames])].sort()
+  // An assignee the office would refuse as a profile name (e.g. >64 chars, a path) gets
+  // no avatar — readSoul/desk/CLI keep their strict validation — but it must not take the
+  // whole board down: before, one such card made /api/hermes/tasks answer 503. The card
+  // itself still lists, with its raw assignee text (React-escaped, ellipsised in the UI).
+  const names = [...new Set([...raw.map((r) => r.name), ...(await listProfiles()), ...busyNames])]
+    .filter(isAvatarName)
+    .sort()
 
   const active = activeTaskByAssignee(tasks)
 

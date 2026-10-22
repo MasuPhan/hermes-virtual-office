@@ -152,6 +152,32 @@ async function main() {
     const agents3 = await kanban.listAgents([mk('t_v2', 'running', 'proj-b', '../evil')], [])
     check('unsafe assignee from a card is not turned into an avatar', !agents3.some((x) => x.name.includes('evil')))
 
+    console.log('\n=== 5c. over-long assignee does not take the board down')
+    const longName = 'x'.repeat(70)
+    check('isAvatarName rejects >64 chars / traversal, accepts normal', !kanban.isAvatarName(longName) && !kanban.isAvatarName('../evil') && kanban.isAvatarName('coder') && kanban.isAvatarName('default'))
+    const agents4 = await kanban.listAgents([mk('t_w1', 'running', 'default', longName), mk('t_w2', 'running', 'default', 'frank')], [{ name: longName, onDisk: true, total: 1 }, { name: 'frank', onDisk: true, total: 1 }])
+    check('listAgents skips the bad assignee instead of throwing', !agents4.some((x) => x.name === longName) && agents4.some((x) => x.name === 'frank' && x.status === 'working'), JSON.stringify(agents4.map((x) => x.name)))
+    // A fresh board slug, so nothing comes from the 3 s read cache of earlier sections.
+    kanban._setKanbanExecutorForTest(async (_file, args) => {
+      calls.push(args)
+      const i = args.indexOf('--board')
+      const verb = args[i >= 0 ? i + 2 : 1]
+      const out = (v: unknown) => ({ stdout: JSON.stringify(v), stderr: '' })
+      if (verb === 'boards') return out([{ slug: 'longb', name: 'Long', archived: false, counts: {}, total: 2 }, { slug: 'default', name: 'Default', archived: false, counts: {}, total: 0 }])
+      if (verb === 'list') return out(args.includes('longb') ? [
+        { id: 't_000000l1', title: 'long assignee card', status: 'running', assignee: longName },
+        { id: 't_000000l2', title: 'normal card', status: 'todo', assignee: 'frank' },
+      ] : [])
+      if (verb === 'assignees') return out([{ name: longName, counts: { running: 1 } }, { name: 'frank', counts: { todo: 1 } }])
+      if (verb === 'show') return out({ task: { id: args[i >= 0 ? i + 3 : 2], title: 'x', status: 'running' }, events: [] })
+      return { stdout: '[]', stderr: '' }
+    })
+    kanban._resetBoardCachesForTest()
+    const rLong = await GET(new Request('http://127.0.0.1:3131/api/hermes/tasks?board=longb', { headers: { host: '127.0.0.1:3131' } }) as never)
+    const bLong = (await rLong.json()) as { tasks: { id: string; assignee: string | null }[]; agents: { name: string }[] }
+    check('tasks route 200 with a >64-char assignee on the board', rLong.status === 200, String(rLong.status))
+    check('the card keeps its raw assignee; no avatar for it', bLong.tasks?.some((t) => t.id === 't_000000l1' && t.assignee === longName) && !bLong.agents?.some((x) => x.name === longName) && bLong.agents?.some((x) => x.name === 'frank'), JSON.stringify(bLong).slice(0, 300))
+
     console.log('\n=== 6. audit carries the board')
     await scope.withBoardScope('proj-a', async () => audit.beginAudit({ at: new Date().toISOString(), action: 'steer', taskId: 't_000000a1', effect: 'x' }).finish('ok', true))
     const lines = readFileSync(process.env.OFFICE_AUDIT_PATH!, 'utf8').trim().split('\n').map((l) => JSON.parse(l))
