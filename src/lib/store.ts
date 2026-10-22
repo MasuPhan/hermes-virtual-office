@@ -6,6 +6,7 @@ import type { AvatarDisplay, AvatarState } from './office/types'
 import type { Health } from './office/health'
 import type { CronPulse, WorkSignals, A2aPair } from './office/duty'
 import { fetchJson, setApiBoard } from './api'
+import { t as translate } from './i18n'
 import { readUrlState, storeBoard, storedBoard, urlView, writeUrlParam } from './kanban-url'
 
 /** One Hermes board, as GET /api/hermes/boards returns it. */
@@ -31,6 +32,10 @@ type State = {
   /** What a request without ?board= reads (HERMES_KANBAN_BOARD or the CLI current board). */
   defaultBoard: string
   boardsError: string | null
+  /** What the server allows (GET /api/hermes/boards): archive = management, delete = privileged. */
+  writes: { management: boolean; privileged: boolean }
+  /** Last archive/delete outcome for the Kanban toolbar. */
+  kanbanNotice: { kind: 'ok' | 'err'; text: string } | null
   tasks: Task[]
   agents: Agent[]
   meeting: Meeting | null
@@ -71,6 +76,11 @@ type State = {
   loadBoards: () => Promise<void>
   /** Pick a board: URL + localStorage + every kanban API call. Never runs `boards switch`. */
   setBoard: (slug: string) => void
+  /** Archive cards (optimistic) on the board on screen; running cards are refused server-side. */
+  archiveTasks: (ids: string[]) => Promise<ArchiveResult>
+  /** Permanently delete cards (optimistic); the confirm token binds the request to these ids. */
+  deleteTasks: (ids: string[]) => Promise<ArchiveResult>
+  setKanbanNotice: (n: State['kanbanNotice']) => void
   /** Read ?board / ?view / ?task (and the stored board) once on mount. */
   initFromUrl: (opts?: { view?: boolean }) => void
   /** Baca sinyal kerja. Gagal = tidak ada sinyal, bukan sinyal lama (lihat badannya). */
@@ -95,6 +105,8 @@ export const useOffice = create<State>((set, get) => ({
   boards: [],
   defaultBoard: '',
   boardsError: null,
+  writes: { management: false, privileged: false },
+  kanbanNotice: null,
   tasks: [],
   agents: [],
   meeting: null,
@@ -242,18 +254,32 @@ export const useOffice = create<State>((set, get) => ({
   },
 
   async loadBoards() {
-    const res = await fetchJson<{ boards?: BoardInfo[]; defaultBoard?: string }>('/api/hermes/boards', { cache: 'no-store' })
+    const res = await fetchJson<{ boards?: BoardInfo[]; defaultBoard?: string; writes?: { management?: boolean; privileged?: boolean } }>(
+      '/api/hermes/boards',
+      { cache: 'no-store' },
+    )
     if (!res.ok || !res.data) {
       set({ boardsError: res.error || 'Không đọc được danh sách bảng' })
       return
     }
     const boards = res.data.boards || []
     const defaultBoard = res.data.defaultBoard || ''
-    set({ boards, defaultBoard, boardsError: null })
+    const w = res.data.writes || {}
+    set({ boards, defaultBoard, boardsError: null, writes: { management: w.management === true, privileged: w.privileged === true } })
     // A stored/linked board that no longer exists falls back to the default instead of 404ing every poll.
     const cur = get().board
     if (cur && boards.length && !boards.some((b) => b.slug === cur)) get().setBoard('')
   },
+
+  async archiveTasks(ids) {
+    return cardWrite('archive', ids, set, get)
+  },
+
+  async deleteTasks(ids) {
+    return cardWrite('delete', ids, set, get)
+  },
+
+  setKanbanNotice: (kanbanNotice) => set({ kanbanNotice }),
 
   setBoard(slug) {
     const board = slug && slug === get().defaultBoard ? '' : slug
@@ -332,4 +358,60 @@ export function startPolling(opts: { kanbanOnly?: boolean } = {}) {
     clearTimeout(timer)
     document.removeEventListener('visibilitychange', onVisibility)
   }
+}
+
+/* ----------------------------------------------------- archive / delete -- */
+
+export type ArchiveOutcome = { id: string; ok: boolean; code?: string; title?: string }
+export type ArchiveResult = { ok: boolean; results: ArchiveOutcome[]; error: string | null }
+
+/** Must match deleteConfirmToken() on the server. */
+export function deleteConfirmToken(ids: string[]): string {
+  return `delete:${[...ids].sort().join(',')}`
+}
+
+type SetFn = (p: Partial<State> | ((s: State) => Partial<State>)) => void
+
+async function cardWrite(action: 'archive' | 'delete', ids: string[], set: SetFn, get: () => State): Promise<ArchiveResult> {
+  const board = get().board
+  const prev = get().tasks
+  const target = new Set(ids)
+  // Optimistic: move/remove now, reconcile with the server's per-id answer below.
+  set({
+    tasks:
+      action === 'delete'
+        ? prev.filter((t) => !target.has(t.id) || t.status === 'running')
+        : prev.map((t) => (target.has(t.id) && t.status !== 'running' ? { ...t, status: 'archived' } : t)),
+    kanbanNotice: null,
+  })
+  const res = await fetchJson<{ ok?: boolean; results?: ArchiveOutcome[] }>('/api/hermes/tasks/archive', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(action === 'delete' ? { action, ids, confirm: deleteConfirmToken(ids) } : { action, ids }),
+  })
+  const results = res.data?.results || []
+  const done = results.filter((r) => r.ok).length
+  const failed = results.filter((r) => !r.ok)
+  if (get().board === board) {
+    if (!res.ok && !results.length) set({ tasks: prev })
+    void get().load()
+    void get().loadBoards()
+  }
+  const list = failed.map((f) => `${f.title || f.id} (${codeText(f.code)})`).join('; ')
+  const error = !res.ok && !results.length
+    ? translate('Kanban.noticeFailed', { error: res.error || '' })
+    : failed.length
+      ? translate('Kanban.noticePartial', { done, failed: failed.length, list })
+      : null
+  const okText = action === 'delete' ? translate('Kanban.noticeDeleted', { count: done }) : translate('Kanban.noticeArchived', { count: done })
+  set({ kanbanNotice: error ? { kind: 'err', text: error } : { kind: 'ok', text: okText } })
+  return { ok: !error, results, error }
+}
+
+function codeText(code?: string): string {
+  if (code === 'running') return translate('Kanban.codeRunning')
+  if (code === 'not_found') return translate('Kanban.codeNotFound')
+  if (code === 'already_archived') return translate('Kanban.codeAlready')
+  if (code === 'refused') return translate('Kanban.codeRefused')
+  return translate('Kanban.codeOther')
 }

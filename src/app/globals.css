@@ -563,6 +563,70 @@ button.vp-run:hover { border-left-color: var(--accent); background: #2efcff0a; }
 .vp-board-opt-main .vp-board-name { font: 600 12.5px/1.3 var(--font-title); }
 .vp-board-opt-sub { font: 500 10px/1.4 var(--font-code); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
+/* Lưu trữ / xóa (feat/kanban-archive). */
+.vp-col-action {
+  margin-left: auto;
+  padding: 1px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--line-accent);
+  background: transparent;
+  color: var(--muted);
+  font: 600 9.5px/1.4 var(--font-code);
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.vp-col-action:hover:not(:disabled) { color: var(--accent); border-color: var(--accent); }
+.vp-col-action:disabled { opacity: 0.45; cursor: not-allowed; }
+.vp-col-head .vp-col-action + .vp-count { margin-left: 6px; }
+.vp-kanban-notice {
+  position: sticky;
+  left: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 10px;
+  padding: 7px 12px;
+  border-radius: 12px;
+  border: 1px solid currentColor;
+  background: #08021ccc;
+  font-size: 12.5px;
+}
+.vp-kanban-notice span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.vp-kanban-notice.vp-notice-ok { color: #7ad7a0; }
+.vp-select-bar {
+  position: sticky;
+  left: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin: 0 0 10px;
+  padding: 8px 12px;
+  border-radius: 14px;
+  border: 1px solid var(--accent);
+  background: #2efcff0d;
+  font: 600 12px/1.3 var(--font-title);
+}
+.vp-card.sel { border-color: var(--accent); background: #2efcff12; }
+.vp-card.nosel { opacity: 0.45; cursor: not-allowed; }
+.vp-check {
+  display: inline-grid;
+  place-items: center;
+  width: 14px;
+  height: 14px;
+  margin-right: 6px;
+  vertical-align: -2px;
+  border: 1px solid var(--line-hover);
+  border-radius: 4px;
+  font-size: 10px;
+  color: #08021c;
+}
+.vp-check.on { background: var(--accent); border-color: var(--accent); }
+.vp-confirm-body { margin: 6px 0 0; font-size: 13px; line-height: 1.5; color: var(--text); overflow-wrap: anywhere; }
+.vp-confirm h3 { overflow-wrap: anywhere; }
+.vp-confirm-danger { border-color: var(--red); }
+
 /* Tab cột trên HP (A3): ẩn ở desktop. */
 .vp-col-tabs { display: none; }
 

@@ -46,7 +46,7 @@ export default function KanbanPage() {
         </Link>
       </header>
       <main className="vp-kpage-body vp-k2d">
-        <KanbanColumns search freshness boards tabs />
+        <KanbanColumns search freshness boards tabs manage />
       </main>
       <TaskPanel />
     </div>

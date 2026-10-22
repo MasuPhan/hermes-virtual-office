@@ -8,6 +8,7 @@ import ModelPicker, { type ModelChoice } from './ModelPicker'
 import type { Task } from '@/types/hermes'
 import { fetchJson } from '@/lib/api'
 import { t as translate } from '@/lib/i18n'
+import ConfirmDialog from './ConfirmDialog'
 import type { EvidenceItem, EvidenceVerdict } from '@/lib/hermes/evidence'
 import type { VerificationReading } from '@/lib/hermes/verification'
 
@@ -84,6 +85,12 @@ const STATUS_LABEL: Record<string, string> = {
 export default function TaskPanel() {
   const taskId = useOffice((s) => s.openTaskId)
   const openTask = useOffice((s) => s.openTask)
+  const writes = useOffice((s) => s.writes)
+  const archiveTasks = useOffice((s) => s.archiveTasks)
+  const deleteTasks = useOffice((s) => s.deleteTasks)
+  const [manageConfirm, setManageConfirm] = useState<'archive' | 'delete' | null>(null)
+  const [manageBusy, setManageBusy] = useState(false)
+  const [manageErr, setManageErr] = useState<string | null>(null)
   const tasks = useOffice((s) => s.tasks)
   const agents = useOffice((s) => s.agents)
   const load = useOffice((s) => s.load)
@@ -355,6 +362,72 @@ export default function TaskPanel() {
               )}
             </div>
             <div id="vp-run-why" className="vp-muted">{translate('Kanban.runDisabledWhy')}</div>
+
+            {/* Archive / delete. Running cards are refused (archiving one kills its worker);
+                there is no CLI unarchive, so "Khôi phục" explains instead of failing. */}
+            <div className="vp-sub">{translate('Kanban.manageHeading')}</div>
+            <div className="flex flex-wrap gap-2">
+              {task.status === 'archived' ? (
+                <button className="vp-btn" disabled aria-disabled="true" title={translate('Kanban.unarchiveUnsupported')}>
+                  {translate('Kanban.unarchive')}
+                </button>
+              ) : (
+                <button
+                  className="vp-btn"
+                  disabled={manageBusy || !writes.management || task.status === 'running'}
+                  title={
+                    task.status === 'running'
+                      ? translate('Kanban.runningNoArchive')
+                      : !writes.management
+                        ? translate('Kanban.needWrite')
+                        : undefined
+                  }
+                  onClick={() => setManageConfirm('archive')}
+                >
+                  {translate('Kanban.archive')}
+                </button>
+              )}
+              <button
+                className="vp-btn vp-btn-warn"
+                disabled={manageBusy || !writes.privileged || task.status === 'running'}
+                title={
+                  task.status === 'running'
+                    ? translate('Kanban.runningNoArchive')
+                    : !writes.privileged
+                      ? translate('Kanban.needPrivileged')
+                      : undefined
+                }
+                onClick={() => setManageConfirm('delete')}
+              >
+                {translate('Kanban.delete')}
+              </button>
+            </div>
+            {task.status === 'running' && <div className="vp-muted">{translate('Kanban.runningNoArchive')}</div>}
+            {task.status === 'archived' && <div className="vp-muted">{translate('Kanban.unarchiveUnsupported')}</div>}
+            {manageErr && <div className="vp-err">{manageErr}</div>}
+            {manageConfirm && (
+              <ConfirmDialog
+                title={
+                  manageConfirm === 'delete'
+                    ? translate('Kanban.confirmDeleteTitle', { title: task.title })
+                    : translate('Kanban.confirmArchiveOneTitle', { title: task.title })
+                }
+                body={manageConfirm === 'delete' ? translate('Kanban.confirmDeleteBody') : translate('Kanban.confirmArchiveBody')}
+                confirmLabel={manageConfirm === 'delete' ? translate('Kanban.confirmDeleteBtn') : translate('Kanban.archive')}
+                danger={manageConfirm === 'delete'}
+                busy={manageBusy}
+                onCancel={() => setManageConfirm(null)}
+                onConfirm={async () => {
+                  setManageBusy(true)
+                  setManageErr(null)
+                  const r = manageConfirm === 'delete' ? await deleteTasks([task.id]) : await archiveTasks([task.id])
+                  setManageBusy(false)
+                  setManageConfirm(null)
+                  if (!r.ok) setManageErr(r.error)
+                  else if (manageConfirm === 'delete') openTask(null)
+                }}
+              />
+            )}
 
             <div className="vp-sub">MÔ HÌNH TÁC TỬ CHO VIỆC NÀY</div>
             <ModelPicker
