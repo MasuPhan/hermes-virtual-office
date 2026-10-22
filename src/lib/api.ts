@@ -38,7 +38,7 @@ export async function readJson<T = unknown>(r: Response): Promise<ApiResult<T>> 
       ok: false,
       status,
       data: null,
-      error: `tidak bisa membaca balasan server (HTTP ${status})`,
+      error: `Không thể đọc phản hồi từ máy chủ (HTTP ${status})`,
     }
   }
 
@@ -49,7 +49,7 @@ export async function readJson<T = unknown>(r: Response): Promise<ApiResult<T>> 
       ok: r.ok,
       status,
       data: null,
-      error: r.ok ? null : `server membalas kosong (HTTP ${status})`,
+      error: r.ok ? null : `Máy chủ trả về phản hồi trống (HTTP ${status})`,
     }
   }
 
@@ -64,8 +64,8 @@ export async function readJson<T = unknown>(r: Response): Promise<ApiResult<T>> 
       status,
       data: null,
       error: looksHtml
-        ? `server membalas halaman HTML, bukan JSON (HTTP ${status}) — biasanya proxy atau backend mati`
-        : `balasan server bukan JSON (HTTP ${status})`,
+        ? `Máy chủ trả về trang HTML thay vì JSON (HTTP ${status}) — thường do proxy hoặc backend ngừng hoạt động`
+        : `Phản hồi của máy chủ không phải JSON (HTTP ${status})`,
     }
   }
 
@@ -80,7 +80,7 @@ export async function readJson<T = unknown>(r: Response): Promise<ApiResult<T>> 
     ok: r.ok,
     status,
     data: parsed as T,
-    error: r.ok ? null : serverMsg || `permintaan gagal (HTTP ${status})`,
+    error: r.ok ? null : serverMsg || `Yêu cầu thất bại (HTTP ${status})`,
   }
 }
 
@@ -93,7 +93,7 @@ export async function fetchJson<T = unknown>(
   init?: RequestInit,
 ): Promise<ApiResult<T>> {
   try {
-    const r = await fetch(input, init)
+    const r = await fetch(boardUrl(input), init)
     return await readJson<T>(r)
   } catch (e) {
     // Network-level failure: the request never got a reply.
@@ -101,7 +101,30 @@ export async function fetchJson<T = unknown>(
       ok: false,
       status: 0,
       data: null,
-      error: `tidak bisa menghubungi server: ${(e as Error).message}`,
+      error: `Không thể kết nối máy chủ: ${(e as Error).message}`,
     }
   }
+}
+
+/* ------------------------------------------------------------ kanban board -- */
+
+/**
+ * The Hermes board the UI is looking at ('' = server default). Set by the store when the
+ * user picks a board; every kanban API path then carries `?board=<slug>` so reads and
+ * writes (and their audit lines) hit the same board. `/api/hermes/boards` is not scoped.
+ */
+let apiBoard = ''
+const KANBAN_API = /^\/api\/hermes\/(tasks|board|approvals|control)(\/|\?|$)/
+
+export function setApiBoard(board: string): void {
+  apiBoard = board
+}
+
+export function getApiBoard(): string {
+  return apiBoard
+}
+
+export function boardUrl(input: string, board: string = apiBoard): string {
+  if (!board || !KANBAN_API.test(input) || /[?&]board=/.test(input)) return input
+  return `${input}${input.includes('?') ? '&' : '?'}board=${encodeURIComponent(board)}`
 }

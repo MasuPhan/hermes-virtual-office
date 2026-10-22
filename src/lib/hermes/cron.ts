@@ -16,9 +16,10 @@
  */
 import { execFile } from 'node:child_process'
 import { readFile, stat } from 'node:fs/promises'
-import os from 'node:os'
 import path from 'node:path'
 import { promisify } from 'node:util'
+import { fleetRootEnv, resolveFleetRoot } from './root'
+import { errorTail } from './redact'
 
 const run = promisify(execFile)
 
@@ -26,7 +27,7 @@ const HERMES_BIN = process.env.HERMES_BIN || 'hermes'
 const TIMEOUT_MS = Number(process.env.KANBAN_TIMEOUT_MS || 20_000)
 
 function cleanEnv(): NodeJS.ProcessEnv {
-  const env = { ...process.env }
+  const env = fleetRootEnv(process.env)
   for (const k of [
     'HERMES_DELEGATED_CHILD_CONTEXT',
     'HERMES_SUPERVISED_CHILD',
@@ -51,9 +52,9 @@ async function cli(args: string[], timeout = TIMEOUT_MS): Promise<string> {
   } catch (err) {
     const e = err as NodeJS.ErrnoException & { stdout?: string; stderr?: string }
     if (e.code === 'ENOENT') {
-      throw new Error(`Hermes CLI not found at "${HERMES_BIN}". Set HERMES_BIN.`)
+      throw new Error(`Không tìm thấy Hermes CLI tại "${HERMES_BIN}". Hãy đặt HERMES_BIN.`)
     }
-    throw new Error(`hermes ${args.join(' ')} failed: ${(e.stderr || e.message || '').trim()}`)
+    throw new Error(`hermes ${args.join(' ')} thất bại: ${errorTail(e)}`)
   }
 }
 
@@ -122,7 +123,7 @@ type RawJob = {
 function toJob(r: RawJob): CronJob {
   return {
     id: r.id,
-    name: r.name || '(tanpa nama)',
+    name: r.name || '(không tên)',
     prompt: r.prompt || '',
     schedule: r.schedule_display || r.schedule?.display || r.schedule?.expr || '?',
     scheduleKind: r.schedule?.kind || 'cron',
@@ -145,9 +146,9 @@ function toJob(r: RawJob): CronJob {
 
 /* --------------------------------------------------------------------- read -- */
 
-/** Where Hermes keeps its state. `HERMES_HOME` wins if the operator set it. */
+/** Where Hermes keeps its state — the explicit fleet root, never a profile home. */
 function hermesHome(): string {
-  return process.env.HERMES_HOME || path.join(os.homedir(), '.hermes')
+  return resolveFleetRoot(process.env)
 }
 
 /** Every scheduled job, newest first. Empty when the file does not exist yet. */
@@ -194,11 +195,11 @@ export async function readJobList(): Promise<JobListReadout> {
     const e = err as NodeJS.ErrnoException
     // File yang belum ada = operator memang belum menjadwalkan apa pun.
     if (e.code === 'ENOENT') return { jobs: [], ageSeconds: -1 }
-    const msg = (e.message || 'gagal membaca jobs.json').trim().split('\n').slice(-1)[0]
+    const msg = (e.message || 'Không thể đọc jobs.json').trim().split('\n').slice(-1)[0]
     const parse = e instanceof SyntaxError || /JSON/i.test(msg)
     return {
       jobs: [],
-      failure: parse ? `jobs.json rusak (bukan JSON valid): ${msg.slice(0, 200)}` : `jobs.json tak terbaca: ${msg.slice(0, 200)}`,
+      failure: parse ? `jobs.json bị hỏng (JSON không hợp lệ): ${msg.slice(0, 200)}` : `Không thể đọc jobs.json: ${msg.slice(0, 200)}`,
       ageSeconds,
     }
   }
@@ -292,10 +293,10 @@ const SCHEDULE_OK = /^[0-9A-Za-z*/,:\- ]{1,64}$/
  */
 export async function createJob(input: CreateInput): Promise<string> {
   const schedule = input.schedule.trim()
-  if (!schedule) throw new Error('jadwal wajib diisi')
-  if (!SCHEDULE_OK.test(schedule)) throw new Error('jadwal mengandung karakter tidak valid')
+  if (!schedule) throw new Error('Bắt buộc nhập lịch chạy')
+  if (!SCHEDULE_OK.test(schedule)) throw new Error('Lịch chạy chứa ký tự không hợp lệ')
   if (!input.prompt?.trim() && !input.script?.trim()) {
-    throw new Error('isi prompt atau script')
+    throw new Error('Nhập prompt hoặc script')
   }
 
   const args = ['cron', 'create', schedule]
@@ -310,7 +311,7 @@ export async function createJob(input: CreateInput): Promise<string> {
   const out = await cli(args, 60_000)
   // "Created job: c6e11310f4c3"
   const m = out.match(/Created job:\s*([0-9a-f]+)/i)
-  if (!m) throw new Error(`tidak bisa membaca id job dari keluaran CLI: ${out.trim().slice(0, 200)}`)
+  if (!m) throw new Error(`Không thể đọc ID tác vụ từ đầu ra CLI: ${out.trim().slice(0, 200)}`)
   return m[1]
 }
 
@@ -319,6 +320,6 @@ export type JobAction = 'pause' | 'resume' | 'run' | 'remove'
 
 export async function actOnJob(id: string, action: JobAction): Promise<void> {
   const known = await getJob(id)
-  if (!known) throw new Error(`job "${id}" tidak ditemukan`)
+  if (!known) throw new Error(`Tác vụ "${id}" không tìm thấy`)
   await cli(['cron', action, id], 60_000)
 }

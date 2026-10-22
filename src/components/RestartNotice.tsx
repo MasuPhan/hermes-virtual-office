@@ -76,7 +76,7 @@ export default function RestartNotice({
       )
       if (!alive) return
       if (!res.ok || !Array.isArray(res.data?.running)) {
-        setProbe({ kind: 'unknown', message: `Daftar card berjalan tidak bisa dibaca (${res.error ?? 'board tak terbaca'}) — tidak bisa dipastikan ada pekerjaan berjalan atau tidak.` })
+        setProbe({ kind: 'unknown', message: `Không đọc được danh sách thẻ đang chạy (${res.error ?? 'không đọc được bảng'}) — chưa xác định được có công việc đang chạy hay không.` })
         return
       }
       const cards = res.data.running.map((t) => ({ id: t.id, title: t.title, assignee: t.assignee ?? null }))
@@ -88,7 +88,7 @@ export default function RestartNotice({
         kind: 'running',
         count: cards.length,
         cards,
-        message: `${cards.length} card sedang dikerjakan — restart akan membunuh worker-nya, dan pekerjaan yang belum dikomit akan hilang.`,
+        message: `${cards.length} thẻ đang được xử lý — khởi động lại sẽ dừng các tiến trình, và phần việc chưa commit sẽ bị mất.`,
       })
     }
     void load()
@@ -100,7 +100,10 @@ export default function RestartNotice({
   /** Perlu konfirmasi eksplisit bila ada yang berjalan ATAU tak pasti. */
   const needsConfirm = probe.kind === 'running' || probe.kind === 'unknown'
 
+  const restartBlocked = restartBusy || probe.kind === 'loading' || (needsConfirm && !confirmed)
+
   async function restartNow(withConfirm: boolean) {
+    if (restartBlocked) return
     setRestartBusy(true)
     setRestartResult(null)
     setRestartFailed(false)
@@ -115,14 +118,14 @@ export default function RestartNotice({
       )
       if (res.ok) {
         // Jujur: dijadwalkan, BUKAN selesai. Halaman akan putus sebentar.
-        setRestartResult(res.data?.message ?? 'Restart dijadwalkan.')
+        setRestartResult(res.data?.message ?? 'Đã lên lịch khởi động lại.')
         setRestartFailed(false)
       } else if (res.status === 409) {
         // Guard menolak — tampilkan daftar + kalimatnya DI POP UP (bukan log).
         const n = res.data?.runningCount ?? res.data?.running?.length ?? 0
         const list = (res.data?.running ?? []).map((c) => `${c.id} — ${c.title}`).join('\n')
         setRestartResult(
-          `${res.data?.message ?? res.error ?? 'Restart ditahan.'}${list ? `\n\nSedang dikerjakan:\n${list}` : ''}${n ? '' : ''}`,
+          `${res.data?.message ?? res.error ?? 'Đã chặn khởi động lại.'}${list ? `\n\nĐang được xử lý:\n${list}` : ''}${n ? '' : ''}`,
         )
         setRestartFailed(true)
         // Sinkronkan probe dari penolakan route (sumber jujur kedua).
@@ -132,17 +135,17 @@ export default function RestartNotice({
             kind: 'running',
             count: res.data?.runningCount ?? rc.length,
             cards: rc,
-            message: res.data?.message ?? `${rc.length} card sedang dikerjakan — restart akan membunuh worker-nya, dan pekerjaan yang belum dikomit akan hilang.`,
+            message: res.data?.message ?? `${rc.length} thẻ đang được xử lý — khởi động lại sẽ dừng các tiến trình, và phần việc chưa commit sẽ bị mất.`,
           })
         }
       } else {
         setRestartResult(
-          `${res.error ?? 'Restart gagal dijadwalkan.'} Jalankan manual: ${(res.data?.manual ?? [MANUAL_CMD]).join('  ·  ')}`,
+          `${res.error ?? 'Không lên lịch được việc khởi động lại.'} Chạy thủ công: ${(res.data?.manual ?? [MANUAL_CMD]).join('  ·  ')}`,
         )
         setRestartFailed(true)
       }
     } catch (e) {
-      setRestartResult(`Restart gagal dijadwalkan (${(e as Error).message}). Jalankan manual: ${MANUAL_CMD}`)
+      setRestartResult(`Không lên lịch được việc khởi động lại (${(e as Error).message}). Chạy thủ công: ${MANUAL_CMD}`)
       setRestartFailed(true)
     } finally {
       setRestartBusy(false)
@@ -162,19 +165,19 @@ export default function RestartNotice({
   return (
     <div className="vp-modal-backdrop" onClick={onClose}>
       <div className="vp-modal" onClick={(e) => e.stopPropagation()}>
-        <h3>Silahkan restart server</h3>
+        <h3>Vui lòng khởi động lại máy chủ</h3>
         <p className="vp-sub">
-          Setelan &quot;{agentName}&quot; TERSIMPAN, tapi baru BERLAKU setelah server restart — daftar served-agent
-          dibaca SEKALI saat gateway boot, tidak ada hot reload.
+          Cấu hình của &quot;{agentName}&quot; ĐÃ LƯU, nhưng chỉ CÓ HIỆU LỰC sau khi khởi động lại máy chủ — danh sách served-agent
+          chỉ được đọc MỘT LẦN khi gateway khởi chạy, không tự nạp lại.
         </p>
         <p className="vp-note">
-          Sebelum restart: &quot;{agentName}&quot; BELUM bisa dipanggil lewat A2A, dan rapat mode <b>a2a</b> akan
-          menolaknya (menyebut dia belum di-serve).
+          Trước khi khởi động lại: &quot;{agentName}&quot; CHƯA thể được gọi qua A2A, và cuộc họp ở chế độ <b>a2a</b> sẽ
+          từ chối (do tác tử chưa được phục vụ).
         </p>
 
         {/* RESTART-SAFE-1: daftar card berjalan — DI POP UP, bukan di log. */}
         {probe.kind === 'loading' && (
-          <p className="vp-note">memeriksa card yang sedang dikerjakan…</p>
+          <p className="vp-note">đang kiểm tra thẻ được xử lý…</p>
         )}
         {probe.kind === 'running' && (
           <div className="vp-err" role="alert">
@@ -192,7 +195,7 @@ export default function RestartNotice({
         {probe.kind === 'unknown' && (
           <div className="vp-err" role="alert">
             <b>{probe.message}</b>
-            <div className="mt-1 text-xs">Centang di bawah berarti kamu memutuskan tanpa tahu — bukan kami yang mewakili.</div>
+            <div className="mt-1 text-xs">Chọn bên dưới nghĩa là bạn chấp nhận quyết định khi chưa rõ trạng thái — hệ thống không quyết định thay bạn.</div>
           </div>
         )}
 
@@ -205,8 +208,8 @@ export default function RestartNotice({
               style={{ marginTop: 2 }}
             />
             <span>
-              Saya tahu restart akan membunuh worker yang sedang berjalan, dan pekerjaan yang belum dikomit akan
-              hilang. Tetap restart.
+              Tôi hiểu khởi động lại sẽ dừng tiến trình đang chạy và phần việc chưa commit sẽ
+              bị mất. Vẫn khởi động lại.
             </span>
           </label>
         )}
@@ -214,21 +217,21 @@ export default function RestartNotice({
         {!restartResult && (
           <div className="vp-modal-actions">
             <button className="vp-btn" onClick={onClose}>
-              Nanti saja
+              Để sau
             </button>
             <button
               className="vp-btn primary"
               onClick={() => void restartNow(needsConfirm ? confirmed : false)}
-              disabled={restartBusy || (needsConfirm && !confirmed)}
+              disabled={restartBlocked}
               title={
                 probe.kind === 'empty'
-                  ? 'Tidak ada card berjalan — restart langsung dijadwalkan'
+                  ? 'Không có thẻ đang chạy — sẽ lên lịch khởi động lại ngay'
                   : needsConfirm && !confirmed
-                    ? 'Centang konfirmasi dulu — ada pekerjaan berjalan (atau tak pasti)'
-                    : 'Restart sekarang'
+                    ? 'Chọn xác nhận trước — có công việc đang chạy (hoặc chưa rõ)'
+                    : 'Khởi động lại ngay'
               }
             >
-              {restartBusy ? 'Menjadwalkan…' : 'Restart sekarang'}
+              {restartBusy ? 'Đang lên lịch…' : 'Khởi động lại ngay'}
             </button>
           </div>
         )}
@@ -241,19 +244,19 @@ export default function RestartNotice({
                   rows={2}
                   readOnly
                   value={`${MANUAL_CMD}\n${MANUAL_UNIT}`}
-                  aria-label="Perintah restart manual"
+                  aria-label="Lệnh khởi động lại thủ công"
                   style={{ width: '100%' }}
                 />
                 <div>
                   <button className="vp-chip-btn" onClick={() => void copyManual()}>
-                    {copied ? 'tersalin ✓' : 'salin perintah'}
+                    {copied ? 'đã sao chép ✓' : 'sao chép lệnh'}
                   </button>
                 </div>
               </div>
             )}
             <div className="vp-modal-actions" style={{ marginTop: 8 }}>
               <button className="vp-btn primary" onClick={onClose} autoFocus>
-                Mengerti
+                Đã hiểu
               </button>
             </div>
           </div>

@@ -16,6 +16,7 @@
  * written back to the DB, so a reload puts everyone back where they were.
  */
 import * as THREE from 'three'
+import { ENV, FOG, GLOW, RENDER, SKY } from './palette'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { CSS2DRenderer, CSS2DObject } from 'three/examples/jsm/renderers/CSS2DRenderer.js'
 
@@ -47,10 +48,12 @@ import {
 } from './layout'
 import type { Agent, AgentDivision, AgentRole, Meeting, Task } from '@/types/hermes'
 import { dutyOf, a2aTarget, type Duty, type WorkSignals } from './duty'
-import type { AvatarState } from './types'
+import { officeSeats, sceneRows } from './presentation'
+import { officeDivision, type AvatarState, type AvatarDisplay } from './types'
 
 export type SceneAgent = AnimAgent & {
   data: Agent
+  display?: AvatarDisplay
   /** Row id in `avatar_state` — what the DB writes are keyed on. */
   avatarId: string
   kind: 'dummy' | 'agent'
@@ -185,7 +188,7 @@ function selectiveShadow(root: THREE.Object3D, light: THREE.DirectionalLight) {
   light.shadow.normalBias = 0.02
 }
 
-function skyGradientTexture(stops = ['#9dc4e8', '#c6dcef', '#e2edf6', '#eef4f8']): THREE.Texture {
+function skyGradientTexture(stops: readonly string[] = SKY.day): THREE.Texture {
   const c = document.createElement('canvas')
   c.width = 2
   c.height = 256
@@ -203,17 +206,47 @@ function skyGradientTexture(stops = ['#9dc4e8', '#c6dcef', '#e2edf6', '#eef4f8']
   return t
 }
 
+/** Night sky: one Points draw call on the upper hemisphere; unaffected by fog. */
+function starField(): THREE.Points {
+  const { count, size, radius, color } = SKY.stars
+  const pos = new Float32Array(count * 3)
+  let seed = 7
+  const rand = () => {
+    seed = (seed * 1664525 + 1013904223) >>> 0
+    return seed / 4294967296
+  }
+  for (let i = 0; i < count; i++) {
+    const y = 0.06 + rand() * 0.94
+    const ring = Math.sqrt(1 - y * y)
+    const a = rand() * Math.PI * 2
+    pos[i * 3] = Math.cos(a) * ring * radius
+    pos[i * 3 + 1] = y * radius
+    pos[i * 3 + 2] = Math.sin(a) * ring * radius
+  }
+  const geo = new THREE.BufferGeometry()
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3))
+  const mat = new THREE.PointsMaterial({
+    color,
+    size,
+    sizeAttenuation: false,
+    fog: false,
+    transparent: true,
+    opacity: 0.85,
+    depthWrite: false,
+  })
+  const pts = new THREE.Points(geo, mat)
+  pts.name = 'night-stars'
+  pts.frustumCulled = false
+  return pts
+}
+
 function envContrastTexture(): THREE.Texture {
   const c = document.createElement('canvas')
   c.width = 512
   c.height = 256
   const g = c.getContext('2d')!
   const grad = g.createLinearGradient(0, 0, 0, 256)
-  grad.addColorStop(0, '#dfefff')
-  grad.addColorStop(0.42, '#bcd6ea')
-  grad.addColorStop(0.5, '#f4e6cf')
-  grad.addColorStop(0.62, '#6a6152')
-  grad.addColorStop(1, '#241f1a')
+  for (const [at, col] of ENV.stops) grad.addColorStop(at, col)
   g.fillStyle = grad
   g.fillRect(0, 0, 512, 256)
   const panels: [number, number, number, number][] = [
@@ -225,9 +258,9 @@ function envContrastTexture(): THREE.Texture {
   ]
   for (const [x, y, w, h] of panels) {
     const rg = g.createRadialGradient(x + w / 2, y + h / 2, 1, x + w / 2, y + h / 2, Math.max(w, h))
-    rg.addColorStop(0, '#ffffff')
-    rg.addColorStop(0.5, 'rgba(255,246,224,0.85)')
-    rg.addColorStop(1, 'rgba(255,246,224,0)')
+    rg.addColorStop(0, ENV.panelCore)
+    rg.addColorStop(0.5, ENV.panelMid)
+    rg.addColorStop(1, ENV.panelEdge)
     g.fillStyle = rg
     g.fillRect(x - w, y - h, w * 3, h * 3)
   }
@@ -247,7 +280,7 @@ export function createScene(
   renderer.shadowMap.enabled = true
   renderer.shadowMap.type = THREE.PCFSoftShadowMap
   renderer.toneMapping = THREE.ACESFilmicToneMapping
-  renderer.toneMappingExposure = 1.1
+  renderer.toneMappingExposure = RENDER.exposure
   renderer.outputColorSpace = THREE.SRGBColorSpace
 
   const pmrem = new THREE.PMREMGenerator(renderer)
@@ -264,7 +297,10 @@ export function createScene(
   scene.environmentIntensity = 1.0
   pmrem.dispose()
   scene.background = skyGradientTexture()
-  scene.fog = new THREE.Fog(0xd3e2ef, 80, 220)
+  scene.fog = new THREE.Fog(FOG.day, FOG.near, FOG.far)
+  const stars = starField()
+  stars.visible = false
+  scene.add(stars)
 
   let hour = Number(
     new Intl.DateTimeFormat('en-GB', { hour: '2-digit', hour12: false, timeZone: 'Asia/Jakarta' })
@@ -295,6 +331,7 @@ export function createScene(
   const byName = new Map<string, SceneAgent>()
   /** Division per name, so a meeting can be routed to the right room. */
   const divisionOf = new Map<string, AgentDivision>()
+  const officeDesks = new Map<string, number>()
   /** Latest avatar rows from the DB (positions restored on first sync). */
   let avatarRows: AvatarState[] = []
   /** Latest Hermes roster. */
@@ -343,6 +380,7 @@ export function createScene(
 
     const a: SceneAgent = {
       data,
+      display: row,
       avatarId: row.avatarId,
       kind: row.kind,
       level: row.level as Level,
@@ -374,7 +412,7 @@ export function createScene(
     }
     avatars.push(a)
     byName.set(row.name, a)
-    divisionOf.set(row.name, row.division)
+    divisionOf.set(row.name, officeDivision(row, data.division))
     setLabel(a)
 
     // Place the body at the position the DB remembers — that is the whole point
@@ -386,7 +424,7 @@ export function createScene(
 
   function setLabel(a: SceneAgent) {
     const el = a.label.element as HTMLDivElement
-    el.textContent = a.data.displayName
+    el.textContent = [a.display?.displayName ?? a.data.displayName ?? a.data.name, a.display?.roleLabel].filter(Boolean).join(' · ')
     el.dataset.status = a.data.status
     el.dataset.role = a.data.role
     el.dataset.kind = a.kind
@@ -411,8 +449,8 @@ export function createScene(
    * Reconcile the world with the DB rows + the Hermes roster.
    *
    * A name present in BOTH is a real agent (roster status wins). A name present
-   * only in the DB is a dummy: it walks and idles but has no task and costs
-   * nothing.
+   * only in the DB is rendered only when it is explicitly a dummy. Real
+   * settings rows do not confer membership.
    *
    * AN AGENT WITH NO DB ROW STILL GETS A BODY. Rows are only ever written by the
    * scene, so a freshly spawned agent — one that has never been saved — had no row
@@ -422,6 +460,7 @@ export function createScene(
    * exactly what spawning should look like.
    */
   function syncAvatars(rows: AvatarState[], agents: Agent[]) {
+    rows = sceneRows(rows, agents)
     avatarRows = rows
     agentRows = agents
     const agentByName = new Map(agents.map((a) => [a.name, a]))
@@ -447,9 +486,20 @@ export function createScene(
         facing: Math.PI,
         spawned: true,
         anchored: false,
+        useHermesDivision: true,
         updatedAt: new Date().toISOString(),
       }))
     const all = missing.length ? [...rows, ...missing] : rows
+    // Keep the source roster untouched. Only the scene's seating map changes.
+    const previousDivisions = new Map(divisionOf)
+    const previousDesks = new Map(officeDesks)
+    officeDesks.clear()
+    divisionOf.clear()
+    for (const agent of agents) {
+      const row = all.find((r) => r.name === agent.name)!
+      divisionOf.set(agent.name, officeDivision(row, agent.division))
+    }
+    for (const [name, desk] of officeSeats(agents, all)) officeDesks.set(name, desk)
 
     // Drop bodies the DB no longer lists AND the roster no longer has, UNLESS they
     // are real agents leaving.
@@ -467,6 +517,9 @@ export function createScene(
     for (const row of all) {
       const existing = byName.get(row.name)
       const data = agentByName.get(row.name) ?? dummyAgent(row)
+      const previousDivision = previousDivisions.get(row.name)
+      const division = officeDivision(row, data.division)
+      divisionOf.set(row.name, division)
       const kind: 'dummy' | 'agent' = agentByName.has(row.name) ? 'agent' : 'dummy'
       if (existing) {
         if (existing.leaving) existing.leaving = false
@@ -475,9 +528,17 @@ export function createScene(
           existing.data.deskIndex !== data.deskIndex ||
           existing.data.currentTaskId !== data.currentTaskId ||
           existing.kind !== kind
+        if (previousDesks.get(row.name) !== officeDesks.get(row.name) || previousDivision !== division || existing.display?.divisionOverride !== row.divisionOverride || existing.display?.useHermesDivision !== row.useHermesDivision) {
+          existing.path = []
+          existing.destKey = ''
+          existing.target = null
+          existing.restUntil = 0
+        }
+        existing.display = row
         existing.data = data
         existing.kind = kind
         existing.avatar.group.userData.kind = kind
+        setLabel(existing)
         if (changed) {
           existing.ease = 0
           setLabel(existing)
@@ -492,6 +553,7 @@ export function createScene(
         }
       }
     }
+    if (currentMeeting) meetingRoom = meetingRoomFor(currentMeeting.participants, divisionOf)
     restored = true
   }
 
@@ -614,7 +676,7 @@ export function createScene(
     const isDummy = a.kind === 'dummy'
     const meetingLive = meeting?.state === 'queued' || meeting?.state === 'running'
     const inMeeting = !!(meeting && meetingLive && meeting.participants.includes(a.data.name))
-    const myDesk = a.data.deskIndex != null ? deskByIndex(a.data.deskIndex) ?? null : null
+    const myDesk = officeDesks.has(a.data.name) ? deskByIndex(officeDesks.get(a.data.name)!) ?? null : null
     const a2a = a2aLive.get(a.data.name) ?? null
     const duty = dutyOf({
       inMeeting,
@@ -697,8 +759,8 @@ export function createScene(
     // (lihat `a2aTarget` di duty.ts). Tanpa meja sama sekali → jangan ke mana-mana.
     if (duty === 'a2a') {
       const pair = a2aLive.get(a.data.name)
-      const ownIdx = a.data.deskIndex ?? null
-      const t = a2aTarget(ownIdx, pair?.peerDesk ?? null, !!pair?.peer && pair.peer === a.data.name)
+      const ownIdx = officeDesks.get(a.data.name) ?? null
+      const t = a2aTarget(ownIdx, (pair?.peer ? officeDesks.get(pair.peer) : undefined) ?? pair?.peerDesk ?? null, !!pair?.peer && pair.peer === a.data.name)
       const desk = t ? deskByIndex(t.deskIndex) ?? null : null
       if (t && desk) {
         if (t.visit) {
@@ -912,7 +974,11 @@ export function createScene(
       out.push({
         avatarId: a.avatarId,
         name: a.data.name,
-        division: divisionOf.get(a.data.name) ?? 'tech',
+        displayName: a.display?.displayName,
+        divisionOverride: a.display?.divisionOverride,
+        roleLabel: a.display?.roleLabel,
+        useHermesDivision: a.display?.useHermesDivision ?? true,
+        division: a.data.division ?? 'exec',
         kind: a.kind,
         x: Number(g.position.x.toFixed(2)),
         z: Number(g.position.z.toFixed(2)),
@@ -1142,7 +1208,7 @@ export function createScene(
       if (a.data.deskIndex != null && office.monitors[a.data.deskIndex]) {
         const mat = office.monitors[a.data.deskIndex].material as THREE.MeshStandardMaterial
         const st = a.data.status
-        const target = st === 'working' ? 1.9 : st === 'review' ? 1.35 : 0.55
+        const target = st === 'working' ? GLOW.monitor.working : st === 'review' ? GLOW.monitor.review : GLOW.monitor.ei
         mat.emissiveIntensity += (target - mat.emissiveIntensity) * Math.min(1, dt * 4)
       }
 
@@ -1278,12 +1344,13 @@ export function createScene(
   }
 
   const skyDay = skyGradientTexture()
-  const skyNight = skyGradientTexture(['#20344d', '#31465f', '#4a6076', '#63798c'])
+  const skyNight = skyGradientTexture(SKY.night)
   function setHour(h: number) {
     hour = h
     office.applyPalette(h)
     scene.background = h >= 18 || h < 6 ? skyNight : skyDay
-    scene.fog = new THREE.Fog(h >= 18 || h < 6 ? 0x54697d : 0xd3e2ef, 80, 220)
+    scene.fog = new THREE.Fog(h >= 18 || h < 6 ? FOG.night : FOG.day, FOG.near, FOG.far)
+    stars.visible = h >= 18 || h < 6
   }
   setHour(hour)
 
@@ -1305,6 +1372,8 @@ export function createScene(
   function dispose() {
     stop()
     controls.dispose()
+    stars.geometry.dispose()
+    ;(stars.material as THREE.Material).dispose()
     renderer.domElement.removeEventListener('mousedown', onDown)
     renderer.domElement.removeEventListener('mouseup', onUp)
     renderer.dispose()

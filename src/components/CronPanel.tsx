@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import Collapsible from './Collapsible'
+import { uiState } from './UiLabels'
 import ActionItems from './ActionItems'
 import FullPanel from './FullPanel'
 import type { Candidate } from '@/types/hermes'
@@ -60,13 +61,13 @@ function when(iso: string | null): string {
   const mins = Math.round(abs / 60_000)
   const label =
     abs < 60_000
-      ? 'sekarang'
+      ? 'bây giờ'
       : mins < 60
-        ? `${mins} mnt`
+        ? `${mins} phút`
         : abs < 86_400_000
-          ? `${Math.round(mins / 60)} jam`
-          : `${Math.round(abs / 86_400_000)} hari`
-  return diff >= 0 ? `dalam ${label}` : `${label} lalu`
+          ? `${Math.round(mins / 60)} giờ`
+          : `${Math.round(abs / 86_400_000)} ngày`
+  return diff >= 0 ? `sau ${label}` : `${label} trước`
 }
 
 export default function CronPanel({
@@ -113,7 +114,7 @@ export default function CronPanel({
           cache: 'no-store',
         },
       )
-      if (!res.ok) throw new Error(res.error || 'gagal memuat cron')
+      if (!res.ok) throw new Error(res.error || 'không tải được lịch định kỳ')
       setJobs(res.data?.jobs || [])
       setRuns(res.data?.runs || [])
       setJobsFailure(res.data?.jobsFailure || null)
@@ -146,13 +147,13 @@ export default function CronPanel({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action, id }),
       })
-      if (!res.ok) throw new Error(res.error || 'aksi gagal')
+      if (!res.ok) throw new Error(res.error || 'thao tác thất bại')
       setNote(
         action === 'remove'
-          ? 'job dihapus'
+          ? 'đã xóa lịch chạy'
           : action === 'run'
-            ? 'job akan jalan pada tick berikutnya'
-            : `job ${action === 'pause' ? 'dipause' : 'diaktifkan'}`,
+            ? 'lịch sẽ chạy ở nhịp xử lý tiếp theo'
+            : `lịch chạy ${action === 'pause' ? 'đã tạm dừng' : 'đã bật'}`,
       )
       await load()
     } catch (e) {
@@ -172,7 +173,7 @@ export default function CronPanel({
         `/api/hermes/cron/actions?from=${encodeURIComponent(jobId)}`,
         { cache: 'no-store' },
       )
-      if (!res.ok) throw new Error(res.error || 'gagal membaca tindak lanjut')
+      if (!res.ok) throw new Error(res.error || 'không đọc được việc cần theo dõi')
       setItems((prev) => ({ ...prev, [jobId]: res.data?.items || [] }))
       setRoster(res.data?.roster || [])
     } catch (e) {
@@ -198,12 +199,12 @@ export default function CronPanel({
           paused: !liveNow,
         }),
       })
-      if (!res.ok || !res.data) throw new Error(res.error || 'gagal membuat job')
+      if (!res.ok || !res.data) throw new Error(res.error || 'không tạo được lịch chạy')
       const newId = res.data.id
       setNote(
         liveNow
-          ? `job dibuat dan langsung aktif (${newId})`
-          : `job dibuat dalam keadaan pause (${newId}) — aktifkan kalau sudah benar`,
+          ? `đã tạo và bật lịch chạy ngay (${newId})`
+          : `đã tạo lịch chạy ở trạng thái tạm dừng (${newId}) — kiểm tra rồi bật khi đã đúng`,
       )
       setSchedule('')
       setPrompt('')
@@ -256,12 +257,12 @@ export default function CronPanel({
   return (
     <FullPanel
       onClose={onClose}
-      label="Cron"
-      title={screen === 'new' ? 'Job baru' : 'Cron'}
+      label="Lịch định kỳ"
+      title={screen === 'new' ? 'Lịch chạy mới' : 'Lịch định kỳ'}
       actions={
         screen === 'new' && (
           <button className="vp-chip-btn" onClick={() => setScreen('list')}>
-            ← Kembali
+            ← Quay lại
           </button>
         )
       }
@@ -269,36 +270,36 @@ export default function CronPanel({
     >
       {err && <div className="vp-err">{err}</div>}
       {note && <div className="vp-ok">{note}</div>}
-      {loading && <div className="vp-muted">memuat…</div>}
+      {loading && <div className="vp-muted">đang tải…</div>}
       {/* jobs.json gagal dibaca = "tak terbaca", BUKAN "belum ada job" — pola jujur (bedakan baca-gagal dari kosong). */}
-      {jobsFailure && <div className="vp-err">jadwal tak terbaca (bukan &quot;tidak ada job&quot;): {jobsFailure}</div>}
+      {jobsFailure && <div className="vp-err">không đọc được lịch (không có nghĩa là &quot;chưa có lịch chạy&quot;): {jobsFailure}</div>}
 
       {screen === 'list' ? (
         <>
           <button className="vp-btn" onClick={() => setScreen('new')}>
-            + Buat job
+            + Tạo lịch chạy
           </button>
           <button className="vp-btn vp-btn-rosy" disabled={loading} onClick={load}>
-            Segarkan
+            Làm mới
           </button>
 
-          <div className="vp-sub">JOB ({jobs.length})</div>
+          <div className="vp-sub">LỊCH CHẠY ({jobs.length})</div>
           <div className="flex flex-col gap-2">
             {jobs.map((j) => (
               <div key={j.id} className={`vp-cron-card ${j.enabled ? 'on' : ''}`}>
                 <div className="vp-cron-top">
                   <b>{j.name}</b>
-                  <span className={`vp-cron-state ${j.enabled ? 'on' : 'off'}`}>{j.state}</span>
+                  <span className={`vp-cron-state ${j.enabled ? 'on' : 'off'}`}>{uiState(j.state)}</span>
                 </div>
                 <i className="vp-cron-sched">{j.schedule}</i>
                 <div className="vp-cron-meta">
-                  <span>{j.enabled ? `jalan ${when(j.nextRunAt)}` : 'dijeda'}</span>
-                  {j.lastRunAt && <span>terakhir {when(j.lastRunAt)}</span>}
+                  <span>{j.enabled ? `chạy ${when(j.nextRunAt)}` : 'tạm dừng'}</span>
+                  {j.lastRunAt && <span>lần cuối {when(j.lastRunAt)}</span>}
                   {j.failureStreak > 0 && (
-                    <span className="vp-cron-bad">gagal {j.failureStreak}×</span>
+                    <span className="vp-cron-bad">thất bại {j.failureStreak}×</span>
                   )}
                 </div>
-                {j.prompt && <Collapsible label="Prompt" text={j.prompt} />}
+                {j.prompt && <Collapsible label="Chỉ dẫn" text={j.prompt} />}
                 {j.lastError && <div className="vp-cron-err">{j.lastError}</div>}
 
                 {/* The cross-menu link: a failing job becomes a task. Offered only
@@ -310,7 +311,7 @@ export default function CronPanel({
                         candidates={items[j.id]}
                         roster={roster}
                         origin={{ kind: 'cron', ref: j.id }}
-                        label="TINDAK LANJUT → TUGAS"
+                        label="VIỆC THEO DÕI → CÔNG VIỆC"
                       />
                     ) : (
                       <button
@@ -321,7 +322,7 @@ export default function CronPanel({
                           void loadItems(j.id)
                         }}
                       >
-                        {itemsBusy === j.id ? '…' : 'Buat tugas dari kegagalan ini'}
+                        {itemsBusy === j.id ? '…' : 'Tạo công việc từ lỗi này'}
                       </button>
                     )}
                   </>
@@ -331,46 +332,46 @@ export default function CronPanel({
                     <Guarded
                       id={j.id}
                       action="pause"
-                      label="Pause"
-                      confirmLabel="Yakin jeda?"
+                      label="Tạm dừng"
+                      confirmLabel="Xác nhận tạm dừng?"
                     />
                   ) : (
                     <Guarded
                       id={j.id}
                       action="resume"
-                      label="Aktifkan"
-                      confirmLabel="Yakin aktifkan?"
+                      label="Bật"
+                      confirmLabel="Xác nhận bật?"
                     />
                   )}
                   <Guarded
                     id={j.id}
                     action="run"
-                    label="Jalankan"
-                    confirmLabel="Yakin jalan?"
+                    label="Chạy"
+                    confirmLabel="Xác nhận chạy?"
                   />
                   <Guarded
                     id={j.id}
                     action="remove"
-                    label="Hapus"
-                    confirmLabel="Yakin hapus?"
+                    label="Xóa"
+                    confirmLabel="Xác nhận xóa?"
                     className="vp-btn-danger"
                   />
                 </div>
               </div>
             ))}
-            {!jobs.length && !jobsFailure && <span className="vp-muted">belum ada job terjadwal</span>}
+            {!jobs.length && !jobsFailure && <span className="vp-muted">chưa có lịch chạy định kỳ</span>}
           </div>
 
           {runs.length > 0 && (
             <>
-              <div className="vp-sub">EKSEKUSI TERAKHIR ({runs.length})</div>
+              <div className="vp-sub">LẦN CHẠY GẦN ĐÂY ({runs.length})</div>
               <div className="flex flex-col gap-1">
                 {runs.slice(0, 12).map((r) => (
                   <div key={r.id} className="vp-cron-run">
                     {/* Hermes reports a good run as `completed`, not `success`;
                         matching only `success` painted every green run grey. */}
                     <span className={`vp-cron-state ${['success', 'completed'].includes(r.status) ? 'on' : 'off'}`}>
-                      {r.status}
+                      {uiState(r.status)}
                     </span>
                     <i>{r.jobId}</i>
                     <span>{when(r.startedAt)}</span>
@@ -382,7 +383,7 @@ export default function CronPanel({
         </>
       ) : (
         <>
-          <label className="vp-sub">JADWAL</label>
+          <label className="vp-sub">LỊCH CHẠY</label>
           <input
             className="vp-input"
             value={schedule}
@@ -390,21 +391,21 @@ export default function CronPanel({
             placeholder="30m  ·  every 2h  ·  0 9 * * *"
           />
 
-          <label className="vp-sub">PROMPT</label>
+          <label className="vp-sub">CHỈ DẪN</label>
           <textarea
             className="vp-input"
             rows={3}
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
-            placeholder="perintah"
+            placeholder="nhập chỉ dẫn"
           />
 
-          <label className="vp-sub">NAMA (opsional)</label>
+          <label className="vp-sub">TÊN (không bắt buộc)</label>
           <input
             className="vp-input"
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder="cek rilis harian"
+            placeholder="kiểm tra bản phát hành hằng ngày"
           />
 
           <label className="vp-check">
@@ -413,7 +414,7 @@ export default function CronPanel({
               checked={liveNow}
               onChange={(e) => setLiveNow(e.target.checked)}
             />
-            <span>langsung aktif (kalau tidak dicentang, job dibuat pause dulu)</span>
+            <span>bật ngay (nếu không chọn, lịch chạy được tạo ở trạng thái tạm dừng)</span>
           </label>
 
           <button
@@ -421,7 +422,7 @@ export default function CronPanel({
             disabled={busy === 'create' || !schedule.trim() || !prompt.trim()}
             onClick={create}
           >
-            {busy === 'create' ? 'Membuat…' : 'Buat job'}
+            {busy === 'create' ? 'Đang tạo…' : 'Tạo lịch chạy'}
           </button>
         </>
       )}

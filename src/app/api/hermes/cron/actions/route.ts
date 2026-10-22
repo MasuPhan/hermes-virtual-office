@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getJob } from '@/lib/hermes/cron'
 import { listAgents, listTasks } from '@/lib/hermes/kanban'
 import { visibleNames } from '@/lib/hermes/office-membership'
+import { assertApiRequest } from '@/lib/api-policy'
 import type { Candidate } from '@/types/hermes'
 
 export const dynamic = 'force-dynamic'
@@ -17,10 +18,12 @@ export const dynamic = 'force-dynamic'
  * `/api/hermes/tasks`.
  */
 export async function GET(req: NextRequest) {
+  const denied = assertApiRequest(req, 'read')
+  if (denied) return denied
   const from = req.nextUrl.searchParams.get('from')
   if (!from) {
     return NextResponse.json(
-      { error: { code: 'invalid_request', message: 'from=<jobId> wajib', status: 400 } },
+      { error: { code: 'invalid_request', message: 'Bắt buộc có from=<jobId>', status: 400 } },
       { status: 400 },
     )
   }
@@ -31,7 +34,7 @@ export async function GET(req: NextRequest) {
   const job = await getJob(from)
   if (!job) {
     return NextResponse.json(
-      { error: { code: 'invalid_request', message: `job "${from}" tidak ditemukan`, status: 404 } },
+      { error: { code: 'invalid_request', message: `Tác vụ "${from}" không tìm thấy`, status: 404 } },
       { status: 404 },
     )
   }

@@ -22,13 +22,19 @@
 
 import { DatabaseSync } from 'node:sqlite'
 import { existsSync, readFileSync, statSync } from 'node:fs'
-import { homedir } from 'node:os'
 import { join } from 'node:path'
+import { resolveFleetRoot } from './root'
 
-const HERMES = process.env.HERMES_HOME || join(homedir(), '.hermes')
-const STATE_DB = join(HERMES, 'state.db')
-const PRICING_CACHE = join(HERMES, 'models_dev_cache.json')
-const ERROR_LOG = join(HERMES, 'logs', 'errors.log')
+/** Resolved per call — never a named-profile home used as the fleet root. */
+function stateDbPath(): string {
+  return join(resolveFleetRoot(process.env), 'state.db')
+}
+function pricingCachePath(): string {
+  return join(resolveFleetRoot(process.env), 'models_dev_cache.json')
+}
+function errorLogPath(): string {
+  return join(resolveFleetRoot(process.env), 'logs', 'errors.log')
+}
 
 /**
  * Buka read-only: panel ini melapor, tidak boleh bisa merusak apa pun.
@@ -37,9 +43,10 @@ const ERROR_LOG = join(HERMES, 'logs', 'errors.log')
  * lain, dan menambah `better-sqlite3` berarti satu langkah build native hanya untuk membaca.
  */
 function openState(): DatabaseSync | null {
-  if (!existsSync(STATE_DB)) return null
+  const dbPath = stateDbPath()
+  if (!existsSync(dbPath)) return null
   try {
-    return new DatabaseSync(STATE_DB, { readOnly: true })
+    return new DatabaseSync(dbPath, { readOnly: true })
   } catch {
     return null
   }
@@ -62,7 +69,7 @@ function loadPrices(): Map<string, Price> {
   if (priceCache) return priceCache
   const out = new Map<string, Price>()
   try {
-    const raw = JSON.parse(readFileSync(PRICING_CACHE, 'utf8')) as Record<string, unknown>
+    const raw = JSON.parse(readFileSync(pricingCachePath(), 'utf8')) as Record<string, unknown>
     for (const [prov, pv] of Object.entries(raw)) {
       const models = (pv as { models?: Record<string, { cost?: Record<string, number>; id?: string }> })?.models
       if (!models) continue
@@ -167,7 +174,7 @@ export function readUsage(days = 30): UsageReport {
     recentSessions: [],
   }
   const db = openState()
-  if (!db) return { ...empty, failure: 'state.db tidak ditemukan atau tidak bisa dibuka' }
+  if (!db) return { ...empty, failure: 'Không tìm thấy hoặc không mở được state.db' }
 
   try {
     // BATAS WAKTUNYA DARI `last_seen`, DAN INI PERNAH SALAH.
@@ -272,7 +279,7 @@ export function readUsage(days = 30): UsageReport {
 
     const stat = (() => {
       try {
-        return statSync(STATE_DB).mtimeMs
+        return statSync(stateDbPath()).mtimeMs
       } catch {
         return 0
       }
@@ -338,11 +345,12 @@ export type ErrorReport = {
 export function readErrors(sinceHours = 24, max = 400): ErrorReport {
   const now = new Date()
   const base: ErrorReport = { readAt: now.toISOString(), ageSeconds: -1, total: 0, buckets: [], recent: [] }
-  if (!existsSync(ERROR_LOG)) return base
+  const logPath = errorLogPath()
+  if (!existsSync(logPath)) return base
 
   try {
-    const age = Math.round((now.getTime() - statSync(ERROR_LOG).mtimeMs) / 1000)
-    const raw = readFileSync(ERROR_LOG, 'utf8').split('\n')
+    const age = Math.round((now.getTime() - statSync(logPath).mtimeMs) / 1000)
+    const raw = readFileSync(logPath, 'utf8').split('\n')
 
     // Baris log diawali timestamp; baris lanjutan (stack trace, HTML dari Cloudflare) tidak.
     // Yang dihitung hanya baris ber-timestamp, supaya satu kegagalan tidak dihitung 40 kali
@@ -361,13 +369,13 @@ export function readErrors(sinceHours = 24, max = 400): ErrorReport {
     const classify = (line: string): string => {
       const l = line.toLowerCase()
       if (/http 5\d\d|error code: 5\d\d|internal server error|<html/.test(l)) return 'provider 5xx'
-      if (/rate.?limit|429/.test(l)) return 'kena rate limit'
-      if (/timeout|timed out/.test(l)) return 'timeout'
-      if (/unauthorized|401|403|invalid api key|\bno api key\b/.test(l)) return 'kredensial ditolak'
-      if (/context.{0,12}(length|window)|too many tokens/.test(l)) return 'context penuh'
-      if (/\bunknown\b|not found|404/.test(l)) return 'model/endpoint tidak dikenal'
-      if (/traceback|exception|error\b/.test(l)) return 'error lain'
-      return 'warning'
+      if (/rate.?limit|429/.test(l)) return 'Bị giới hạn tần suất'
+      if (/timeout|timed out/.test(l)) return 'Hết thời gian chờ'
+      if (/unauthorized|401|403|invalid api key|\bno api key\b/.test(l)) return 'Thông tin xác thực bị từ chối'
+      if (/context.{0,12}(length|window)|too many tokens/.test(l)) return 'Ngữ cảnh đã đầy'
+      if (/\bunknown\b|not found|404/.test(l)) return 'Mô hình/endpoint không xác định'
+      if (/traceback|exception|error\b/.test(l)) return 'Lỗi khác'
+      return 'Cảnh báo'
     }
 
     const counts = new Map<string, { count: number; sample: string }>()
@@ -417,9 +425,9 @@ export function readStatus(): StatusReport {
     }
   }
   const sources = [
-    one('state.db', STATE_DB),
-    one('models_dev_cache.json', PRICING_CACHE),
-    one('logs/errors.log', ERROR_LOG),
+    one('state.db', stateDbPath()),
+    one('models_dev_cache.json', pricingCachePath()),
+    one('logs/errors.log', errorLogPath()),
   ]
   return {
     readAt: new Date(now).toISOString(),

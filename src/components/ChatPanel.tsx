@@ -39,14 +39,14 @@ function when(iso: string): string {
   if (Number.isNaN(t)) return ''
   const diff = Date.now() - t
   const mins = Math.round(diff / 60_000)
-  if (mins < 1) return 'baru saja'
-  if (mins < 60) return `${mins} mnt`
-  if (diff < 86_400_000) return `${Math.round(mins / 60)} jam`
-  return `${Math.round(diff / 86_400_000)} hr`
+  if (mins < 1) return 'vừa xong'
+  if (mins < 60) return `${mins} phút`
+  if (diff < 86_400_000) return `${Math.round(mins / 60)} giờ`
+  return `${Math.round(diff / 86_400_000)} ngày`
 }
 
 function clock(ts: number): string {
-  return new Date(ts).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })
+  return new Date(ts).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })
 }
 
 /** Initials for the avatar bubble, like a chat app. */
@@ -102,7 +102,7 @@ export default function ChatPanel({
       profiles?: string[]
     }>('/api/hermes/chat', { cache: 'no-store' })
     if (!res.ok) {
-      setErr(res.error || 'gagal memuat daftar percakapan')
+      setErr(res.error || 'không tải được danh sách trò chuyện')
       setLoading(false)
       return
     }
@@ -134,7 +134,7 @@ export default function ChatPanel({
       .then((res) => {
         if (!alive) return
         if (!res.ok) {
-          setErr(res.error || 'gagal memuat percakapan')
+          setErr(res.error || 'không tải được cuộc trò chuyện')
           return
         }
         setSession(res.data?.session ?? null)
@@ -167,7 +167,7 @@ export default function ChatPanel({
         body: JSON.stringify({ agent: openAgent, message: text }),
       })
       if (!res.ok || !res.data) {
-        setErr(res.error || 'agent tidak menjawab')
+        setErr(res.error || 'tác tử không phản hồi')
         // Roll the optimistic bubble back so the transcript matches what the agent
         // actually received.
         setMessages((m) => m.slice(0, -1))
@@ -177,7 +177,7 @@ export default function ChatPanel({
       setSession(res.data.session)
       setMessages((m) => [
         ...m,
-        { role: 'assistant', content: res.data!.reply || '(kosong)', ts: Date.now() },
+        { role: 'assistant', content: res.data!.reply || '(trống)', ts: Date.now() },
       ])
       void loadList()
     } finally {
@@ -193,7 +193,7 @@ export default function ChatPanel({
       method: 'DELETE',
     })
     if (!res.ok) {
-      setErr(res.error || 'gagal menghapus thread')
+      setErr(res.error || 'không xóa được cuộc trò chuyện')
       setBusy(false)
       return
     }
@@ -207,7 +207,7 @@ export default function ChatPanel({
   async function createAgent() {
     const name = newName.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '')
     if (!name) {
-      setErr('nama agent hanya huruf kecil, angka, - dan _')
+      setErr('tên tác tử chỉ gồm chữ thường, số, - và _')
       return
     }
     setCreateBusy(true)
@@ -219,7 +219,7 @@ export default function ChatPanel({
         body: JSON.stringify({ action: 'create', name }),
       })
       if (!res.ok) {
-        setErr(res.error || 'gagal membuat agent')
+        setErr(res.error || 'không tạo được tác tử')
         return
       }
       setNewName('')
@@ -245,14 +245,14 @@ export default function ChatPanel({
   return (
     <FullPanel
       onClose={onClose}
-      label={openAgent ? `Chat dengan ${openAgent}` : 'Chat'}
+      label={openAgent ? `Trò chuyện với ${openAgent}` : 'Trò chuyện'}
       tall
       className="vp-chat"
       bodyClassName="vp-pad flex flex-col gap-3 vp-chat-body"
       title={
         openAgent ? (
           <div className="vp-chat-head">
-            <button className="vp-chat-back" onClick={() => setOpenAgent(null)} aria-label="Kembali">
+            <button className="vp-chat-back" onClick={() => setOpenAgent(null)} aria-label="Quay lại">
               ←
             </button>
             <span className="vp-chat-av" style={{ background: `hsl(${hue(openAgent)} 42% 32%)` }}>
@@ -260,17 +260,17 @@ export default function ChatPanel({
             </span>
             <div className="vp-chat-head-name">
               <b>{openAgent}</b>
-              <i>{session ? `${session.messageCount} pesan` : 'percakapan baru'}</i>
+              <i>{session ? `${session.messageCount} tin nhắn` : 'cuộc trò chuyện mới'}</i>
             </div>
           </div>
         ) : (
-          'Chat'
+          'Trò chuyện'
         )
       }
       actions={
         !openAgent && (
           <button className="vp-chip-btn" onClick={() => setCreating((v) => !v)}>
-            + Agent
+            + Tác tử
           </button>
         )
       }
@@ -283,18 +283,18 @@ export default function ChatPanel({
             className="vp-input"
             value={newName}
             autoFocus
-            placeholder="nama agent (mis. riset, backend)"
+            placeholder="tên tác tử (ví dụ: riset, backend)"
             onChange={(e) => setNewName(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === 'Enter') void createAgent()
             }}
           />
           <button className="vp-btn" disabled={createBusy || !newName.trim()} onClick={createAgent}>
-            {createBusy ? '…' : 'Buat'}
+            {createBusy ? '…' : 'Tạo'}
           </button>
           <div className="vp-note">
-            Agent = profil Hermes. Tiap agent punya memory sendiri, dan muncul di kantor
-            setelah dibuat.
+            Tác tử = hồ sơ Hermes. Mỗi tác tử có bộ nhớ riêng và xuất hiện trong văn phòng
+            sau khi được tạo.
           </div>
         </div>
       )}
@@ -302,7 +302,7 @@ export default function ChatPanel({
       {!openAgent ? (
         /* ------------------------------------------------- the chat list -- */
         <>
-          {loading && <div className="vp-muted">memuat…</div>}
+          {loading && <div className="vp-muted">đang tải…</div>}
           <div className="flex flex-col">
             {rows.map((name) => {
               const s = byAgent.get(name)
@@ -313,7 +313,7 @@ export default function ChatPanel({
                   className="vp-chat-row"
                   onClick={() => setOpenAgent(name)}
                   disabled={!canChat}
-                  title={canChat ? '' : 'belum punya profil'}
+                  title={canChat ? '' : 'chưa có hồ sơ'}
                 >
                   <span
                     className="vp-chat-av"
@@ -327,7 +327,7 @@ export default function ChatPanel({
                       <i>{s ? when(s.updatedAt) : ''}</i>
                     </span>
                     <span className="vp-chat-row-sub">
-                      {s ? s.title : canChat ? 'mulai percakapan' : 'belum punya profil'}
+                      {s ? s.title : canChat ? 'bắt đầu trò chuyện' : 'chưa có hồ sơ'}
                     </span>
                   </span>
                 </button>
@@ -335,7 +335,7 @@ export default function ChatPanel({
             })}
             {!loading && !rows.length && (
               <div className="vp-muted">
-                belum ada agent — klik <b>+ Agent</b> untuk membuat satu
+                chưa có tác tử — nhấn <b>+ Tác tử</b> để tạo tác tử
               </div>
             )}
           </div>
@@ -344,13 +344,13 @@ export default function ChatPanel({
         /* -------------------------------------------------- the conversation -- */
         <>
           <div className="vp-chat-scroll" ref={scroller}>
-            {loading && <div className="vp-muted">memuat riwayat…</div>}
+            {loading && <div className="vp-muted">đang tải lịch sử…</div>}
             {!loading && !messages.length && (
               <div className="vp-chat-empty">
-                Mulai percakapan dengan <b>{openAgent}</b>.
+                Bắt đầu trò chuyện với <b>{openAgent}</b>.
                 <br />
                 <span className="vp-muted">
-                  Pesan disimpan di memory agent ini dan tetap ada setelah aplikasi restart.
+                  Tin nhắn được lưu trong bộ nhớ của tác tử này và vẫn còn sau khi khởi động lại ứng dụng.
                 </span>
               </div>
             )}
@@ -376,7 +376,7 @@ export default function ChatPanel({
               className="vp-input"
               rows={2}
               value={draft}
-              placeholder="Tulis pesan…"
+              placeholder="Nhập tin nhắn…"
               onChange={(e) => setDraft(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && !e.shiftKey) {
@@ -389,7 +389,7 @@ export default function ChatPanel({
               className="vp-chat-send"
               disabled={busy || !draft.trim()}
               onClick={send}
-              aria-label="Kirim"
+              aria-label="Gửi"
             >
               ➤
             </button>
@@ -397,7 +397,7 @@ export default function ChatPanel({
 
           {session && (
             <button className="vp-chat-reset" disabled={busy} onClick={resetThread}>
-              Hapus riwayat percakapan ini
+              Xóa lịch sử cuộc trò chuyện này
             </button>
           )}
         </>

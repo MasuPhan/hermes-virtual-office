@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { listModels } from '@/lib/hermes/kanban'
+import { assertApiRequest } from '@/lib/api-policy'
 
 export const dynamic = 'force-dynamic'
 
@@ -11,7 +12,9 @@ export const dynamic = 'force-dynamic'
  * with — a hardcoded dropdown would drift from config.yaml. The CLI masks
  * api_key, so nothing secret leaves the server.
  */
-export async function GET() {
+export async function GET(req: Request) {
+  const denied = assertApiRequest(req, 'read')
+  if (denied) return denied
   try {
     return NextResponse.json({ models: await listModels() })
   } catch (err) {

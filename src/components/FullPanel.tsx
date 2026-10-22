@@ -132,11 +132,11 @@ export default function FullPanel({
             {slate ? (
               // Tampilan "tutup" Papan/Sistem dipertahankan; tombolnya sendiri 44×44
               // supaya mudah ditekan jari, margin negatif menjaga tinggi header tetap.
-              <button className="vp-full-x -my-2.5" onClick={onClose} aria-label="Tutup">
-                <span className="rounded border border-slate-600 px-2 py-1 hover:bg-slate-800">tutup</span>
+              <button className="vp-full-x -my-2.5" onClick={onClose} aria-label="Đóng">
+                <span className="rounded border border-slate-600 px-2 py-1 hover:bg-slate-800">đóng</span>
               </button>
             ) : (
-              <button className="vp-x vp-full-x" onClick={onClose} aria-label="Tutup">
+              <button className="vp-x vp-full-x" onClick={onClose} aria-label="Đóng">
                 ×
               </button>
             )}

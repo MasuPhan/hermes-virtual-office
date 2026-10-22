@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { EVIDENCE_BATCH_CAP } from '@/lib/hermes/evidence'
 import { evidenceMarks } from '@/lib/hermes/kanban'
+import { assertApiRequest } from '@/lib/api-policy'
+import { inRequestBoard } from '@/lib/hermes/board-request'
 
 export const dynamic = 'force-dynamic'
 
@@ -11,12 +13,14 @@ export const dynamic = 'force-dynamic'
  * RINGKAS: hanya `kanban show --json` per id (ringkasan + runs), tanpa log dan lampiran.
  * Maksimal EVIDENCE_BATCH_CAP id diperiksa; sisanya `unchecked` (netral, tidak dinilai).
  */
-export async function POST(req: NextRequest) {
+async function handlePOST(req: NextRequest) {
+  const denied = assertApiRequest(req, 'read')
+  if (denied) return denied
   const body = await req.json().catch(() => ({}))
   const ids: unknown = body?.ids
   if (!Array.isArray(ids)) {
     return NextResponse.json(
-      { error: { code: 'invalid_request', message: 'ids (array) wajib diisi', status: 400 } },
+      { error: { code: 'invalid_request', message: 'Bắt buộc có ids (mảng)', status: 400 } },
       { status: 400 },
     )
   }
@@ -24,7 +28,7 @@ export async function POST(req: NextRequest) {
     const marks = await evidenceMarks(ids.filter((x): x is string => typeof x === 'string'))
     return NextResponse.json({
       mode: 'ringkas',
-      note: 'ringkas: hanya show+runs per id, tanpa log dan lampiran; panel detail membaca semuanya',
+      note: 'Rút gọn: chỉ show+runs theo từng ID, không có nhật ký và tệp đính kèm; bảng chi tiết đọc toàn bộ dữ liệu',
       cap: EVIDENCE_BATCH_CAP,
       ageSeconds: 0,
       readAt: new Date().toISOString(),
@@ -36,4 +40,9 @@ export async function POST(req: NextRequest) {
       { status: 502 },
     )
   }
+}
+
+/* Board scope: `?board=<slug>` → every CLI call in the handler gets `--board <slug>`. */
+export async function POST(req: NextRequest) {
+  return inRequestBoard(req, () => handlePOST(req))
 }

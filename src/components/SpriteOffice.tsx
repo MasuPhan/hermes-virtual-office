@@ -1,10 +1,14 @@
 'use client'
 
-import { useEffect, useRef } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
+import { t as translate } from '@/lib/i18n'
+import { uiState } from './UiLabels'
 import type { Agent, Meeting, Task } from '@/types/hermes'
+import { officeAgents } from '@/lib/office/presentation'
 import { useOffice } from '@/lib/store'
 import { columnOf } from '@/lib/office/board'
 import { NIGHT_PALETTE, paletteFor } from '@/lib/office/layout'
+import { palCss } from '@/lib/office/palette'
 import {
   BARS, BBQ, DESKS, DOOR, FOOTPRINTS, GARDEN_BEDS, GYM, HALF_D, HALF_W,
   IDLE_SPOTS, KANBAN_BOARD, LEVEL_H, LOUNGE, MEETING_ROOMS, MEETING_ROOM_IDS,
@@ -38,10 +42,13 @@ const sy = (x: number, z: number) => OY + (x + z) * T / 2
 type Pt = [number, number]
 const at = (x: number, z: number, y = 0): Pt => [sx(x, z), sy(x, z) - y * U]
 
+/* Readable retro palette: warm wood floors, light walls, natural greens. Brand colours
+   (cyan/violet) only on accents: screens, status dots, selection. Props that are not
+   listed here go through `palCss`, the same rule as the 3D view (slightly cooled greys). */
 const C = {
   floorA: '#b6955f', floorB: '#c1a26c',
-  wallTop: '#e6e2cf', wallSide: '#cbd0be', partTop: '#d6d2c1', partSide: '#aeb3a3',
-  wood: '#8d6238', woodTop: '#c69a5c', metal: '#5b6a73', screen: '#33505a',
+  wallTop: '#e4e6e8', wallSide: '#c4cad0', partTop: '#d4d7da', partSide: '#a9b0b7',
+  wood: '#8d6238', woodTop: '#c69a5c', metal: '#5b6a73', screen: '#2efcff',
   rug: '#6f8f6b', rug2: '#5f7fa0', leaf: '#4f8149', leaf2: '#6da05c', pot: '#a86a4c',
   cream: '#efe6cd', sofa: '#4f7ba3', board: '#2f5a45', glass: '#8fc3cc',
 }
@@ -55,7 +62,7 @@ const C = {
  * gets the same read — and the boundary is `paletteFor`, so both views agree on
  * when night starts.
  */
-const NIGHT_WASH = 'rgba(26,38,66,0.34)'
+const NIGHT_WASH = 'rgba(12,18,34,0.36)'
 
 function poly(ctx: CanvasRenderingContext2D, pts: Pt[], fill: string) {
   ctx.fillStyle = fill
@@ -100,7 +107,7 @@ function buildStatic(): HTMLCanvasElement {
   cv.height = H
   const ctx = cv.getContext('2d')!
   ctx.imageSmoothingEnabled = false
-  ctx.fillStyle = '#141d24'
+  ctx.fillStyle = '#11161d'
   ctx.fillRect(0, 0, W, H)
 
   // Painter's order: sort by depth (x + z); the exec floor is drawn after the
@@ -121,16 +128,16 @@ function buildStatic(): HTMLCanvasElement {
     const px2 = POOL.x + POOL.w / 2
     const pz1 = POOL.z - POOL.d / 2
     const pz2 = POOL.z + POOL.d / 2
-    push(0, c.z1, () => flat(ctx, 0, (c.z1 + pz1) / 2, c.x2 - c.x1, pz1 - c.z1, '#cfc7b4'))
-    push(0, c.z2, () => flat(ctx, 0, (pz2 + c.z2) / 2, c.x2 - c.x1, c.z2 - pz2, '#cfc7b4'))
-    push(c.x1, POOL.z, () => flat(ctx, (c.x1 + px1) / 2, POOL.z, px1 - c.x1, POOL.d, '#cfc7b4'))
-    push(c.x2, POOL.z, () => flat(ctx, (px2 + c.x2) / 2, POOL.z, c.x2 - px2, POOL.d, '#cfc7b4'))
+    push(0, c.z1, () => flat(ctx, 0, (c.z1 + pz1) / 2, c.x2 - c.x1, pz1 - c.z1, palCss('#cfc7b4')))
+    push(0, c.z2, () => flat(ctx, 0, (pz2 + c.z2) / 2, c.x2 - c.x1, c.z2 - pz2, palCss('#cfc7b4')))
+    push(c.x1, POOL.z, () => flat(ctx, (c.x1 + px1) / 2, POOL.z, px1 - c.x1, POOL.d, palCss('#cfc7b4')))
+    push(c.x2, POOL.z, () => flat(ctx, (px2 + c.x2) / 2, POOL.z, c.x2 - px2, POOL.d, palCss('#cfc7b4')))
   }
   // the pool itself: blue water with a stone rim
   push(POOL.x, POOL.z, () => {
-    flat(ctx, POOL.x, POOL.z, POOL.w + 0.7, POOL.d + 0.7, '#b9b2a2')
-    flat(ctx, POOL.x, POOL.z, POOL.w, POOL.d, '#2f8fb5')
-    flat(ctx, POOL.x, POOL.z, POOL.w - 0.8, POOL.d - 0.8, '#3aa3c9')
+    flat(ctx, POOL.x, POOL.z, POOL.w + 0.7, POOL.d + 0.7, palCss('#b9b2a2'))
+    flat(ctx, POOL.x, POOL.z, POOL.w, POOL.d, palCss('#2f8fb5'))
+    flat(ctx, POOL.x, POOL.z, POOL.w - 0.8, POOL.d - 0.8, palCss('#3aa3c9'))
   })
   // grass patches
   for (const [gx, gz, gw, gd] of [
@@ -194,7 +201,7 @@ function buildStatic(): HTMLCanvasElement {
 
   /* ------------------------------------------------------------ stairs --- */
   push(stairCentre.x, stairCentre.z, () => {
-    solid(ctx, stairCentre.x, stairCentre.z, STAIRS.x2 - STAIRS.x1, STAIRS.z2 - STAIRS.z1, LEVEL_H, '#c3bba6', '#8f8878')
+    solid(ctx, stairCentre.x, stairCentre.z, STAIRS.x2 - STAIRS.x1, STAIRS.z2 - STAIRS.z1, LEVEL_H, palCss('#c3bba6'), palCss('#8f8878'))
   })
 
   /* ------------------------------------------------------- the furniture -- */
@@ -204,10 +211,10 @@ function buildStatic(): HTMLCanvasElement {
       solid(ctx, desk.x, desk.z, 1.8, 1.0, 0.72, C.woodTop, C.wood)
       const mx = desk.x - Math.sin(desk.facing) * 0.28
       const mz = desk.z - Math.cos(desk.facing) * 0.28
-      solid(ctx, mx, mz, 0.7, 0.16, 0.5, C.screen, '#3a4750')
+      solid(ctx, mx, mz, 0.7, 0.16, 0.5, C.screen, palCss('#3a4750'))
     })
     const seat = deskSeatWorld(desk)
-    push(seat.x, seat.z, () => solid(ctx, seat.x, seat.z, 0.6, 0.6, 0.5, C.metal, '#3f4a52'))
+    push(seat.x, seat.z, () => solid(ctx, seat.x, seat.z, 0.6, 0.6, 0.5, C.metal, palCss('#3f4a52')))
   }
   // meeting tables + chairs (exec floor)
   for (const id of MEETING_ROOM_IDS) {
@@ -236,7 +243,7 @@ function buildStatic(): HTMLCanvasElement {
     ctx.fillRect(cx - rx, cy - ry, rx * 2, ry * 2)
     for (let i = 0; i < 4; i++) {
       const hx = cx - rx + rx * 2 * (i + 0.5) / 4
-      ctx.fillStyle = '#8fd0ae'
+      ctx.fillStyle = palCss('#8fd0ae')
       ctx.fillRect(hx - 5, cy - ry + 3, 10, 3)
     }
   })
@@ -252,17 +259,17 @@ function buildStatic(): HTMLCanvasElement {
     const gw = GYM.x2 - GYM.x1
     const gd = GYM.z2 - GYM.z1
     push((GYM.x1 + GYM.x2) / 2, (GYM.z1 + GYM.z2) / 2, () =>
-      flat(ctx, (GYM.x1 + GYM.x2) / 2, (GYM.z1 + GYM.z2) / 2, gw, gd, '#3d6b4b'),
+      flat(ctx, (GYM.x1 + GYM.x2) / 2, (GYM.z1 + GYM.z2) / 2, gw, gd, palCss('#3d6b4b')),
     )
     // barbell rack: two uprights + a bar with plates
     push(GYM.rack.x, GYM.rack.z, () => {
-      for (const ux of [-0.55, 0.55]) solid(ctx, GYM.rack.x + ux, GYM.rack.z, 0.16, 0.16, 1.35, '#2f3438', '#22262a')
+      for (const ux of [-0.55, 0.55]) solid(ctx, GYM.rack.x + ux, GYM.rack.z, 0.16, 0.16, 1.35, palCss('#2f3438'), palCss('#22262a'))
       const [bx, by] = at(GYM.rack.x, GYM.rack.z, 1.32)
-      ctx.fillStyle = '#b9c0c6'
+      ctx.fillStyle = palCss('#b9c0c6')
       ctx.fillRect(bx - 26, by - 3, 52, 6)
       for (const off of [-20, -15, -10, 10, 15, 20]) {
         const [px2] = at(GYM.rack.x + off / 26, GYM.rack.z, 1.32)
-        ctx.fillStyle = '#24282c'
+        ctx.fillStyle = palCss('#24282c')
         ctx.beginPath()
         ctx.arc(px2, by, 5, 0, Math.PI * 2)
         ctx.fill()
@@ -270,12 +277,12 @@ function buildStatic(): HTMLCanvasElement {
     })
     // dumbbell rack
     push(GYM.dumbbells.x, GYM.dumbbells.z, () => {
-      for (const ty of [0.45, 0.75]) solid(ctx, GYM.dumbbells.x, GYM.dumbbells.z, 1.9, 0.3, ty, '#2f3438', '#22262a')
+      for (const ty of [0.45, 0.75]) solid(ctx, GYM.dumbbells.x, GYM.dumbbells.z, 1.9, 0.3, ty, palCss('#2f3438'), palCss('#22262a'))
       for (let i = 0; i < 6; i++) {
         const dx = -0.72 + i * 0.29
         const dz = i < 3 ? 0.16 : -0.16
         const [cx2, cy2] = at(GYM.dumbbells.x + dx, GYM.dumbbells.z + dz, i < 3 ? 0.56 : 0.86)
-        ctx.fillStyle = '#24282c'
+        ctx.fillStyle = palCss('#24282c')
         ctx.beginPath()
         ctx.arc(cx2, cy2, 4, 0, Math.PI * 2)
         ctx.fill()
@@ -284,11 +291,11 @@ function buildStatic(): HTMLCanvasElement {
     // pull-up rig: two posts + the bar
     push(GYM.rig.x, GYM.rig.z, () => {
       for (const px2 of [-GYM.rig.span / 2, GYM.rig.span / 2]) {
-        solid(ctx, GYM.rig.x + px2, GYM.rig.z, 0.16, 0.16, 2.45, '#2f3438', '#22262a')
+        solid(ctx, GYM.rig.x + px2, GYM.rig.z, 0.16, 0.16, 2.45, palCss('#2f3438'), palCss('#22262a'))
       }
       const [rx1, ry1] = at(GYM.rig.x - GYM.rig.span / 2, GYM.rig.z, 2.39)
       const [rx2] = at(GYM.rig.x + GYM.rig.span / 2, GYM.rig.z, 2.39)
-      ctx.strokeStyle = '#b9c0c6'
+      ctx.strokeStyle = palCss('#b9c0c6')
       ctx.lineWidth = 3
       ctx.beginPath()
       ctx.moveTo(rx1, ry1)
@@ -303,7 +310,7 @@ function buildStatic(): HTMLCanvasElement {
         (PLANTING.z1 + PLANTING.z2) / 2,
         PLANTING.x2 - PLANTING.x1,
         PLANTING.z2 - PLANTING.z1,
-        '#5b7f4a',
+        palCss('#5b7f4a'),
       ),
     )
   }
@@ -313,13 +320,13 @@ function buildStatic(): HTMLCanvasElement {
   for (const l of POOL_LOUNGERS) {
     push(l.x, l.z, () => solid(ctx, l.x, l.z, 1.0, 2.1, 0.42, C.woodTop, C.wood))
   }
-  push(BBQ.x, BBQ.z, () => solid(ctx, BBQ.x, BBQ.z, 2.0, 1.15, 0.95, '#4a5054', '#2f3336'))
+  push(BBQ.x, BBQ.z, () => solid(ctx, BBQ.x, BBQ.z, 2.0, 1.15, 0.95, palCss('#4a5054'), palCss('#2f3336')))
   for (const bed of GARDEN_BEDS) {
-    push(bed.x, bed.z, () => solid(ctx, bed.x, bed.z, bed.w, bed.d, 0.5, '#8a6a45', '#6a4f34'))
+    push(bed.x, bed.z, () => solid(ctx, bed.x, bed.z, bed.w, bed.d, 0.5, palCss('#8a6a45'), palCss('#6a4f34')))
   }
   // reception counter + chair
   push(RECEPTION.x, RECEPTION.z, () => solid(ctx, RECEPTION.x, RECEPTION.z, 3.6, 0.9, 1.05, C.woodTop, C.wood))
-  push(RECEPTION.x, RECEPTION.z - 1.15, () => solid(ctx, RECEPTION.x, RECEPTION.z - 1.15, 0.6, 0.6, 0.5, C.metal, '#3f4a52'))
+  push(RECEPTION.x, RECEPTION.z - 1.15, () => solid(ctx, RECEPTION.x, RECEPTION.z - 1.15, 0.6, 0.6, 0.5, C.metal, palCss('#3f4a52')))
   // pantry counter + stools
   push(PANTRY.x, PANTRY.z, () => solid(ctx, PANTRY.x, PANTRY.z, 1.0, 6.4, 0.94, C.woodTop, C.wood))
   for (const sz of PANTRY_STOOLS) {
@@ -328,7 +335,7 @@ function buildStatic(): HTMLCanvasElement {
     )
   }
   // leisure sofa
-  push(LOUNGE.x, LOUNGE.z, () => solid(ctx, LOUNGE.x, LOUNGE.z, 2.8, 1.0, 0.6, C.sofa, '#3f6486'))
+  push(LOUNGE.x, LOUNGE.z, () => solid(ctx, LOUNGE.x, LOUNGE.z, 2.8, 1.0, 0.6, C.sofa, palCss('#3f6486')))
 
   items.sort((a, b) => a.d - b.d)
   for (const item of items) item.f()
@@ -443,7 +450,7 @@ function stepMotions(
 }
 
 const STATUS_DOT: Record<string, string> = {
-  working: '#5fd08d', review: '#e0b95f', blocked: '#e8705f', meeting: '#8f86d6', done: '#6fae8a', idle: '#9fb0b8',
+  working: '#2efcff', review: '#e0b95f', blocked: '#e8705f', meeting: '#8f86d6', done: '#6fae8a', idle: '#9fb0b8',
 }
 
 function person(
@@ -464,7 +471,7 @@ function person(
   ctx.fillStyle = '#1b242b66'
   ctx.beginPath(); ctx.ellipse(cx, cy, 9, 4, 0, 0, Math.PI * 2); ctx.fill()
   if (selected) {
-    ctx.strokeStyle = '#e6c35f'
+    ctx.strokeStyle = '#2efcff'
     ctx.lineWidth = 1
     ctx.strokeRect(cx - 11, y - 31 + bob, 22, 35)
   }
@@ -472,10 +479,10 @@ function person(
   const legH = seated ? 3 : 5
   const legA = seated || !moving ? legH : legH + frame
   const legB = seated || !moving ? legH : legH - frame
-  ctx.fillStyle = '#2c3a42'
+  ctx.fillStyle = palCss('#2c3a42')
   ctx.fillRect(cx - 6, y - 3, 5, 3)
   ctx.fillRect(cx + 1, y - 3, 5, 3)
-  ctx.fillStyle = '#3d4b55'
+  ctx.fillStyle = palCss('#3d4b55')
   ctx.fillRect(cx - 5, y - 3 - legA, 4, legA)
   ctx.fillRect(cx + 1, y - 3 - legB, 4, legB)
   ctx.fillStyle = color
@@ -494,7 +501,7 @@ function person(
   } else {
     ctx.fillRect(cx - 7, y - 24 + bob, 3, 4)
     ctx.fillRect(cx + 4, y - 24 + bob, 3, 4)
-    ctx.fillStyle = '#26323a'
+    ctx.fillStyle = palCss('#26323a')
     if (dir === 'e') {
       ctx.fillRect(cx + 1, y - 21 + bob, 2, 2)
     } else if (dir === 'w') {
@@ -503,13 +510,13 @@ function person(
       ctx.fillRect(cx - 4, y - 21 + bob, 2, 2)
       ctx.fillRect(cx + 2, y - 21 + bob, 2, 2)
     }
-    ctx.fillStyle = '#8f4c46'
+    ctx.fillStyle = palCss('#8f4c46')
     ctx.fillRect(cx - 1, y - 18 + bob, 3, 1)
   }
   if (talking && Math.floor(t * 3) % 2 === 0) {
-    ctx.fillStyle = '#fff4d6'
+    ctx.fillStyle = palCss('#fff4d6')
     ctx.fillRect(cx + 8, y - 34, 18, 12)
-    ctx.fillStyle = '#5a5140'
+    ctx.fillStyle = palCss('#5a5140')
     ctx.fillRect(cx + 11, y - 30, 3, 2)
     ctx.fillRect(cx + 17, y - 30, 3, 2)
   }
@@ -574,15 +581,15 @@ function speechBubble(ctx: CanvasRenderingContext2D, cx: number, cy: number, tex
   // drifts off the top of the canvas.
   const bx = cx + 10
   const by = Math.max(4, cy - 40 - hpx + Math.round(Math.sin(t * 2) * 1.5))
-  ctx.fillStyle = '#fff8e2'
+  ctx.fillStyle = palCss('#fff8e2')
   ctx.fillRect(bx, by, wpx, hpx)
   ctx.fillRect(bx + 3, by + hpx, 4, 4)
-  ctx.fillStyle = '#8d8265'
+  ctx.fillStyle = palCss('#8d8265')
   ctx.fillRect(bx, by, wpx, 1)
   ctx.fillRect(bx, by + hpx - 1, wpx, 1)
   ctx.fillRect(bx, by, 1, hpx)
   ctx.fillRect(bx + wpx - 1, by, 1, hpx)
-  ctx.fillStyle = '#4a4436'
+  ctx.fillStyle = palCss('#4a4436')
   lines.forEach((l, i) => ctx.fillText(l, bx + 5, by + 4 + i * 10))
   ctx.restore()
 }
@@ -627,7 +634,7 @@ function drawFrame(
       const ys = quad.map((p) => p[1])
       const x0 = Math.min(...xs), y0 = Math.min(...ys)
       cards.push({ x: x0, y: y0, w: Math.max(...xs) - x0, h: Math.max(...ys) - y0, id: task.id })
-      ctx.fillStyle = '#3a4a3f'
+      ctx.fillStyle = palCss('#3a4a3f')
       ctx.fillText(task.title.slice(0, 12), (quad[0][0] + quad[2][0]) / 2, (quad[0][1] + quad[2][1]) / 2 - 4)
     })
     // Overflow badge: without it a backlog silently lost every card past the third.
@@ -635,7 +642,7 @@ function drawFrame(
     if (extra > 0) {
       const quad = quadAt(topY - shown.length * 0.66)
       poly(ctx, quad, C.board)
-      ctx.fillStyle = '#eaf6e6'
+      ctx.fillStyle = palCss('#eaf6e6')
       ctx.fillText(`+${extra}`, (quad[0][0] + quad[2][0]) / 2, (quad[0][1] + quad[2][1]) / 2 - 4)
     }
   }
@@ -664,18 +671,20 @@ function drawFrame(
     if (talking && spoken) speechBubble(ctx, cx, cy, spoken, t)
     const label = a.displayName.slice(0, 11)
     const width = Math.max(34, ctx.measureText(label).width + 10)
-    ctx.fillStyle = '#1d2a32'
+    ctx.fillStyle = palCss('#1d2a32')
     ctx.fillRect(cx - width / 2, cy + 2, width, 11)
-    ctx.fillStyle = STATUS_DOT[a.status] || '#9fb0b8'
+    ctx.fillStyle = STATUS_DOT[a.status] || palCss('#9fb0b8')
     ctx.fillRect(cx - width / 2 + 3, cy + 5, 3, 3)
-    ctx.fillStyle = '#f0e6c8'
+    ctx.fillStyle = palCss('#f0e6c8')
     ctx.fillText(label, cx, cy + 4)
   }
 }
 
 export default function SpriteOffice({ onSelect }: { onSelect: (name: string) => void }) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
-  const agents = useOffice((s) => s.agents)
+  const canonicalAgents = useOffice((s) => s.agents)
+  const avatars = useOffice((s) => s.avatars)
+  const agents = useMemo(() => officeAgents(canonicalAgents, avatars), [canonicalAgents, avatars])
   const tasks = useOffice((s) => s.tasks)
   const meeting = useOffice((s) => s.meeting)
   const selected = useOffice((s) => s.selectedAgent)
@@ -759,19 +768,19 @@ export default function SpriteOffice({ onSelect }: { onSelect: (name: string) =>
   }, [])
 
   return (
-    <div className="absolute inset-0 overflow-auto pt-14 vp-sprite-office" aria-label="Kantor pixel 2D">
+    <div className="absolute inset-0 overflow-auto pt-14 vp-sprite-office" aria-label="Văn phòng pixel 2D">
       <div className="vp-sprite-hud" aria-hidden="true">
-        <span>HERMES OFFICE</span><span>{agents.length} agent</span><span>{tasks.length} tugas</span><span>klik sprite untuk pilih</span>
+        <span>{translate("SpriteOffice.text2")}</span><span>{agents.length}{translate("SpriteOffice.text3")}</span><span>{tasks.length}{translate("SpriteOffice.text4")}</span><span>nhấp nhân vật để chọn</span>
       </div>
       <canvas
         ref={canvasRef}
         className="block pixel-office"
         role="img"
-        aria-label="Peta kantor isometrik: ruang rapat, area kerja, lounge, dan lobi sama seperti mode 3D. Klik karakter untuk memilih agent."
+        aria-label="Bản đồ văn phòng phối cảnh: phòng họp, khu làm việc, phòng nghỉ và sảnh giống chế độ 3D. Nhấp nhân vật để chọn tác tử."
       />
-      <div className="sr-only" aria-label="Pilih agent">
+      <div className="sr-only" aria-label="Chọn tác tử">
         {agents.map((agent) => (
-          <button key={agent.name} onClick={() => onSelect(agent.name)}>{agent.displayName}, {agent.status}</button>
+          <button key={agent.name} onClick={() => onSelect(agent.name)}>{agent.displayName}, {uiState(agent.status)}</button>
         ))}
       </div>
     </div>

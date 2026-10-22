@@ -2,14 +2,40 @@
 
 import { create } from 'zustand'
 import type { Agent, ArchivedMeeting, Meeting, Task } from '@/types/hermes'
-import type { AvatarState } from './office/types'
+import type { AvatarDisplay, AvatarState } from './office/types'
 import type { Health } from './office/health'
 import type { CronPulse, WorkSignals, A2aPair } from './office/duty'
-import { fetchJson } from './api'
+import { fetchJson, setApiBoard } from './api'
+import { t as translate } from './i18n'
+import { readUrlState, storeBoard, storedBoard, urlView, writeUrlParam } from './kanban-url'
+
+/** One Hermes board, as GET /api/hermes/boards returns it. */
+export type BoardInfo = {
+  slug: string
+  name: string
+  icon: string
+  color: string
+  description: string
+  total: number
+  counts: Record<string, number>
+  current: boolean
+}
+
+let displayRevision = 0
 
 const POLL_MS = Number(process.env.NEXT_PUBLIC_POLL_MS || 4000)
 
 type State = {
+  /** Hermes board on screen ('' until known = server default). */
+  board: string
+  boards: BoardInfo[]
+  /** What a request without ?board= reads (HERMES_KANBAN_BOARD or the CLI current board). */
+  defaultBoard: string
+  boardsError: string | null
+  /** What the server allows (GET /api/hermes/boards): archive = management, delete = privileged. */
+  writes: { management: boolean; privileged: boolean }
+  /** Last archive/delete outcome for the Kanban toolbar. */
+  kanbanNotice: { kind: 'ok' | 'err'; text: string } | null
   tasks: Task[]
   agents: Agent[]
   meeting: Meeting | null
@@ -47,6 +73,16 @@ type State = {
   work: WorkSignals
 
   load: () => Promise<void>
+  loadBoards: () => Promise<void>
+  /** Pick a board: URL + localStorage + every kanban API call. Never runs `boards switch`. */
+  setBoard: (slug: string) => void
+  /** Archive cards (optimistic) on the board on screen; running cards are refused server-side. */
+  archiveTasks: (ids: string[]) => Promise<ArchiveResult>
+  /** Permanently delete cards (optimistic); the confirm token binds the request to these ids. */
+  deleteTasks: (ids: string[]) => Promise<ArchiveResult>
+  setKanbanNotice: (n: State['kanbanNotice']) => void
+  /** Read ?board / ?view / ?task (and the stored board) once on mount. */
+  initFromUrl: (opts?: { view?: boolean }) => void
   /** Baca sinyal kerja. Gagal = tidak ada sinyal, bukan sinyal lama (lihat badannya). */
   loadWork: () => Promise<void>
   /** Baca kesehatan. Terpisah dari load(), karena kegagalannya tidak boleh menjatuhkan kantor. */
@@ -55,6 +91,7 @@ type State = {
   setOfficeName: (name: string) => Promise<void>
   /** Batch position flush from the 3D scene — the DB write behind idle wander. */
   saveAvatars: (list: AvatarState[]) => Promise<void>
+  setAvatarDisplay: (avatarId: string, settings: AvatarDisplay | null) => Promise<void>
   setView: (v: '3d' | '2d' | 'sprite') => void
   setPeek: (desk: number | null) => void
   openTask: (taskId: string | null) => void
@@ -63,7 +100,13 @@ type State = {
   refreshMeeting: () => Promise<void>
 }
 
-export const useOffice = create<State>((set) => ({
+export const useOffice = create<State>((set, get) => ({
+  board: '',
+  boards: [],
+  defaultBoard: '',
+  boardsError: null,
+  writes: { management: false, privileged: false },
+  kanbanNotice: null,
   tasks: [],
   agents: [],
   meeting: null,
@@ -78,12 +121,12 @@ export const useOffice = create<State>((set) => ({
   openTaskId: null,
   newTaskOpen: false,
 
-  officeName: 'Hermes Office',
+  officeName: 'Văn phòng Hermes',
   avatars: [],
 
   // Mulai dari TIDAK TAHU, bukan dari hijau. Sistem yang belum selesai membaca keadaannya
   // tidak boleh tampil sehat — itu kebohongan yang paling gampang terjadi.
-  health: { level: 'warn', reasons: ['belum membaca keadaan sistem'] },
+  health: { level: 'warn', reasons: ['Chưa đọc trạng thái hệ thống'] },
 
   work: { chatLive: [], cron: null, a2a: [] },
 
@@ -110,23 +153,26 @@ export const useOffice = create<State>((set) => ({
         cache: 'no-store',
       })
       if (!res.ok || !res.data?.health) {
-        set({ health: { level: 'bad', reasons: [res.error || 'tidak bisa membaca keadaan sistem'] } })
+        set({ health: { level: 'bad', reasons: [res.error || 'Không thể đọc trạng thái hệ thống'] } })
         return
       }
       set({ health: res.data.health })
     } catch (e) {
       // Kalau pembacaannya sendiri gagal, itu MERAH — bukan "tetap seperti tadi". Diam
       // beberapa detik itu wajar; tapi menampilkan keadaan lama sebagai sekarang tidak.
-      set({ health: { level: 'bad', reasons: [`tidak bisa membaca keadaan sistem: ${(e as Error).message}`] } })
+      set({ health: { level: 'bad', reasons: [`Không thể đọc trạng thái hệ thống: ${(e as Error).message}`] } })
     }
   },
 
   async load() {
+    const board = get().board
     const res = await fetchJson<{ tasks?: Task[]; agents?: Agent[] }>('/api/hermes/tasks', {
       cache: 'no-store',
     })
+    // The user switched boards while this poll was in flight: its rows belong to the old one.
+    if (get().board !== board) return
     if (!res.ok || !res.data) {
-      set({ error: res.error || 'gagal memuat papan', loading: false })
+      set({ error: res.error || 'Không thể tải bảng', loading: false })
       return
     }
     set({ tasks: res.data.tasks || [], agents: res.data.agents || [], error: null, loading: false })
@@ -138,13 +184,14 @@ export const useOffice = create<State>((set) => ({
    * and this endpoint reads data/office.db, not the CLI.
    */
   async loadOffice() {
+    const revision = displayRevision
     const res = await fetchJson<{
       name?: string
       avatars?: AvatarState[]
     }>('/api/hermes/office', { cache: 'no-store' })
-    if (!res.ok || !res.data) return
+    if (!res.ok || !res.data || revision !== displayRevision) return
     set({
-      officeName: res.data.name || 'Hermes Office',
+      officeName: res.data.name || 'Văn phòng Hermes',
       avatars: res.data.avatars || [],
     })
   },
@@ -168,6 +215,17 @@ export const useOffice = create<State>((set) => ({
       method: 'POST',
       body: JSON.stringify({ action: 'saveAvatars', list }),
     })
+  },
+
+  async setAvatarDisplay(avatarId, settings) {
+    const res = await fetchJson<{ avatar: AvatarState }>('/api/hermes/office', {
+      method: 'POST',
+      body: JSON.stringify({ action: settings ? 'setAvatarDisplay' : 'resetAvatarDisplay', avatarId, ...settings }),
+    })
+    if (!res.ok || !res.data?.avatar) throw new Error(res.error || 'Không thể lưu hiển thị')
+    displayRevision++
+    const avatar = res.data.avatar
+    set((state) => ({ avatars: [...state.avatars.filter((a) => a.avatarId !== avatar.avatarId), avatar] }))
   },
 
   async refreshMeeting() {
@@ -195,15 +253,75 @@ export const useOffice = create<State>((set) => ({
     })
   },
 
-  setView: (view) => set({ view }),
+  async loadBoards() {
+    const res = await fetchJson<{ boards?: BoardInfo[]; defaultBoard?: string; writes?: { management?: boolean; privileged?: boolean } }>(
+      '/api/hermes/boards',
+      { cache: 'no-store' },
+    )
+    if (!res.ok || !res.data) {
+      set({ boardsError: res.error || 'Không đọc được danh sách bảng' })
+      return
+    }
+    const boards = res.data.boards || []
+    const defaultBoard = res.data.defaultBoard || ''
+    const w = res.data.writes || {}
+    set({ boards, defaultBoard, boardsError: null, writes: { management: w.management === true, privileged: w.privileged === true } })
+    // A stored/linked board that no longer exists falls back to the default instead of 404ing every poll.
+    const cur = get().board
+    if (cur && boards.length && !boards.some((b) => b.slug === cur)) get().setBoard('')
+  },
+
+  async archiveTasks(ids) {
+    return cardWrite('archive', ids, set, get)
+  },
+
+  async deleteTasks(ids) {
+    return cardWrite('delete', ids, set, get)
+  },
+
+  setKanbanNotice: (kanbanNotice) => set({ kanbanNotice }),
+
+  setBoard(slug) {
+    const board = slug && slug === get().defaultBoard ? '' : slug
+    if (board === get().board) return
+    setApiBoard(board)
+    storeBoard(board)
+    writeUrlParam('board', board || null)
+    writeUrlParam('task', null)
+    set({ board, tasks: [], openTaskId: null, loading: true })
+    void get().load()
+  },
+
+  initFromUrl(opts = {}) {
+    const u = readUrlState()
+    const board = u.board ?? storedBoard() ?? ''
+    setApiBoard(board)
+    if (board) writeUrlParam('board', board)
+    set({
+      board,
+      ...(opts.view && u.view ? { view: u.view } : {}),
+      ...(u.task ? { openTaskId: u.task } : {}),
+    })
+  },
+
+  setView: (view) => {
+    writeUrlParam('view', view === '3d' ? null : urlView(view))
+    set({ view })
+  },
   setPeek: (peekDesk) => set({ peekDesk }),
-  openTask: (openTaskId) => set({ openTaskId }),
+  openTask: (openTaskId) => {
+    writeUrlParam('task', openTaskId)
+    set({ openTaskId })
+  },
   select: (selectedAgent) => set({ selectedAgent }),
   setNewTaskOpen: (newTaskOpen) => set({ newTaskOpen }),
 }))
 
-/** Poll the board; returns a stop function. */
-export function startPolling() {
+/**
+ * Poll the board; returns a stop function. `kanbanOnly` (the /kanban page) polls just the
+ * tasks — no meeting/office/health/work reads, no 3D scene.
+ */
+export function startPolling(opts: { kanbanOnly?: boolean } = {}) {
   let stopped = false
   let running = false
   let timer: ReturnType<typeof setTimeout> | undefined
@@ -212,7 +330,7 @@ export function startPolling() {
     if (document.hidden) return schedule()
     running = true
     try {
-      await Promise.all([
+      await Promise.all(opts.kanbanOnly ? [useOffice.getState().load()] : [
         useOffice.getState().load(),
         useOffice.getState().refreshMeeting(),
         useOffice.getState().loadOffice(),
@@ -240,4 +358,60 @@ export function startPolling() {
     clearTimeout(timer)
     document.removeEventListener('visibilitychange', onVisibility)
   }
+}
+
+/* ----------------------------------------------------- archive / delete -- */
+
+export type ArchiveOutcome = { id: string; ok: boolean; code?: string; title?: string }
+export type ArchiveResult = { ok: boolean; results: ArchiveOutcome[]; error: string | null }
+
+/** Must match deleteConfirmToken() on the server. */
+export function deleteConfirmToken(ids: string[]): string {
+  return `delete:${[...ids].sort().join(',')}`
+}
+
+type SetFn = (p: Partial<State> | ((s: State) => Partial<State>)) => void
+
+async function cardWrite(action: 'archive' | 'delete', ids: string[], set: SetFn, get: () => State): Promise<ArchiveResult> {
+  const board = get().board
+  const prev = get().tasks
+  const target = new Set(ids)
+  // Optimistic: move/remove now, reconcile with the server's per-id answer below.
+  set({
+    tasks:
+      action === 'delete'
+        ? prev.filter((t) => !target.has(t.id) || t.status === 'running')
+        : prev.map((t) => (target.has(t.id) && t.status !== 'running' ? { ...t, status: 'archived' } : t)),
+    kanbanNotice: null,
+  })
+  const res = await fetchJson<{ ok?: boolean; results?: ArchiveOutcome[] }>('/api/hermes/tasks/archive', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(action === 'delete' ? { action, ids, confirm: deleteConfirmToken(ids) } : { action, ids }),
+  })
+  const results = res.data?.results || []
+  const done = results.filter((r) => r.ok).length
+  const failed = results.filter((r) => !r.ok)
+  if (get().board === board) {
+    if (!res.ok && !results.length) set({ tasks: prev })
+    void get().load()
+    void get().loadBoards()
+  }
+  const list = failed.map((f) => `${f.title || f.id} (${codeText(f.code)})`).join('; ')
+  const error = !res.ok && !results.length
+    ? translate('Kanban.noticeFailed', { error: res.error || '' })
+    : failed.length
+      ? translate('Kanban.noticePartial', { done, failed: failed.length, list })
+      : null
+  const okText = action === 'delete' ? translate('Kanban.noticeDeleted', { count: done }) : translate('Kanban.noticeArchived', { count: done })
+  set({ kanbanNotice: error ? { kind: 'err', text: error } : { kind: 'ok', text: okText } })
+  return { ok: !error, results, error }
+}
+
+function codeText(code?: string): string {
+  if (code === 'running') return translate('Kanban.codeRunning')
+  if (code === 'not_found') return translate('Kanban.codeNotFound')
+  if (code === 'already_archived') return translate('Kanban.codeAlready')
+  if (code === 'refused') return translate('Kanban.codeRefused')
+  return translate('Kanban.codeOther')
 }

@@ -150,9 +150,9 @@ export default function ModelPicker({
               {m.label}
             </button>
           ))}
-          {!shown.length && <div className="vp-model-empty">tidak ada model yang cocok</div>}
+          {!shown.length && <div className="vp-model-empty">không có mô hình phù hợp</div>}
           {total > shown.length && (
-            <div className="vp-model-empty">…{total - shown.length} lainnya, ketik untuk mempersempit</div>
+            <div className="vp-model-empty">…{total - shown.length} mô hình khác, nhập để lọc</div>
           )}
         </div>
       )}

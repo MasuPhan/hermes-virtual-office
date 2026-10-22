@@ -12,7 +12,6 @@
  */
 import { execFile } from 'node:child_process'
 import { access, readFile, readdir, writeFile } from 'node:fs/promises'
-import os from 'node:os'
 import path from 'node:path'
 import { promisify } from 'node:util'
 import type { Agent, NewTaskInput, Task, TaskOrigin, TaskStatus, AgentDivision, AgentRole } from '@/types/hermes'
@@ -22,11 +21,43 @@ import { parseDomains } from './a2a'
 import { readEvidence, splitEvidenceBatch, type EvidenceInput, type EvidenceMark, type EvidenceReading } from './evidence'
 import type { RunningCard, RunningReadout } from './restart-guard'
 import { readVerification, splitVerificationBatch, type VerificationMark, type VerificationReading, type VerifyEvent } from './verification'
+import { fleetRootEnv, resolveFleetRoot } from './root'
+import { profileDir, validateAssigneeName, validateProfileName } from './profile-name'
+import { errorTail } from './redact'
+import { envBoard, scopedBoard, validateBoardSlug } from './board-scope'
 
 const run = promisify(execFile)
 
+type ExecResult = { stdout: string; stderr: string }
+type TestExecutor = (
+  file: string,
+  args: string[],
+  options: { env?: NodeJS.ProcessEnv; timeout?: number; maxBuffer?: number },
+) => Promise<ExecResult>
+
+let testExecutor: TestExecutor | null = null
+
+/**
+ * Test-only seam: inject an in-memory subprocess. Production always uses the
+ * real Hermes CLI; no test in this repository may invoke a live model or CLI.
+ */
+export function _setKanbanExecutorForTest(fn: TestExecutor | null): void {
+  testExecutor = fn
+}
+
+async function exec(
+  file: string,
+  args: string[],
+  options: { env?: NodeJS.ProcessEnv; timeout?: number; maxBuffer?: number },
+): Promise<ExecResult> {
+  if (testExecutor) return testExecutor(file, args, options)
+  const r = await run(file, args, options)
+  return { stdout: String(r.stdout), stderr: String(r.stderr) }
+}
+
 const HERMES_BIN = process.env.HERMES_BIN || 'hermes'
-const BOARD = process.env.HERMES_KANBAN_BOARD || ''
+/** Office default board (`HERMES_KANBAN_BOARD`); '' = the CLI's current board. Per-request boards come from `withBoardScope`. */
+const BOARD = envBoard()
 const TIMEOUT_MS = Number(process.env.KANBAN_TIMEOUT_MS || 20_000)
 
 /**
@@ -47,7 +78,7 @@ const readCache = new Map<string, { at: number; out: string }>()
 
 /** Env without the agent-session markers the CLI treats as "inside a worker". */
 function cleanEnv(): NodeJS.ProcessEnv {
-  const env = { ...process.env }
+  const env = fleetRootEnv(process.env)
   for (const k of [
     'HERMES_DELEGATED_CHILD_CONTEXT',
     'HERMES_SUPERVISED_CHILD',
@@ -61,8 +92,19 @@ function cleanEnv(): NodeJS.ProcessEnv {
   return env
 }
 
-async function kanban(args: string[], board?: string): Promise<string> {
-  const useBoard = board ?? BOARD
+/**
+ * The board a CLI call runs against: an explicit `board` argument, else the request's
+ * scope (`withBoardScope`), else the office default. `null` = no `--board` at all (only for
+ * board-agnostic verbs such as `boards list`).
+ */
+export function effectiveBoard(board?: string | null): string {
+  if (board === null) return ''
+  const b = board || scopedBoard() || BOARD
+  return b ? validateBoardSlug(b) : ''
+}
+
+async function kanban(args: string[], board?: string | null): Promise<string> {
+  const useBoard = effectiveBoard(board)
   const full = useBoard ? ['kanban', '--board', useBoard, ...args] : ['kanban', ...args]
   const cacheable = READ_VERBS.has(args[0])
   const key = full.join(' ')
@@ -74,7 +116,7 @@ async function kanban(args: string[], board?: string): Promise<string> {
     readCache.clear()
   }
   try {
-    const { stdout } = await run(HERMES_BIN, full, {
+    const { stdout } = await exec(HERMES_BIN, full, {
       env: cleanEnv(),
       timeout: TIMEOUT_MS,
       maxBuffer: 8 * 1024 * 1024,
@@ -85,18 +127,23 @@ async function kanban(args: string[], board?: string): Promise<string> {
     const e = err as NodeJS.ErrnoException & { stdout?: string; stderr?: string }
     if (e.code === 'ENOENT') {
       throw new Error(
-        `Hermes CLI not found at "${HERMES_BIN}". Set HERMES_BIN to the hermes executable.`,
+        `Không tìm thấy Hermes CLI tại "${HERMES_BIN}". Đặt HERMES_BIN trỏ đến tệp thực thi hermes.`,
       )
     }
-    throw new Error(`hermes ${full.join(' ')} failed: ${(e.stderr || e.message || '').trim()}`)
+    throw new Error(`hermes ${full.join(' ')} thất bại: ${errorTail(e)}`)
   }
 }
 
-async function kanbanJson<T>(args: string[], board?: string): Promise<T> {
+/** Raw CLI call for sibling modules (task-archive). Board scope + write cache-clear apply. */
+export function kanbanRaw(args: string[]): Promise<string> {
+  return kanban(args)
+}
+
+async function kanbanJson<T>(args: string[], board?: string | null): Promise<T> {
   const out = await kanban([...args, '--json'], board)
   // The CLI prints a single JSON document, but be defensive about leading notices.
   const start = out.search(/[[{]/)
-  if (start < 0) throw new Error(`expected JSON from: hermes kanban ${args.join(' ')}`)
+  if (start < 0) throw new Error(`Cần đầu ra JSON từ: hermes kanban ${args.join(' ')}`)
   return JSON.parse(out.slice(start)) as T
 }
 
@@ -142,8 +189,9 @@ function iso(ts?: number | null): string | undefined {
   return typeof ts === 'number' && ts > 0 ? new Date(ts * 1000).toISOString() : undefined
 }
 
-function toTask(r: RawTask): Task {
+function toTask(r: RawTask, board?: string): Task {
   return {
+    ...(board ? { board } : {}),
     id: r.id,
     title: r.title,
     body: r.body ?? undefined,
@@ -174,8 +222,9 @@ function toTask(r: RawTask): Task {
  */
 export async function listTasks(opts: { includeArchived?: boolean; board?: string } = {}): Promise<Task[]> {
   const args = opts.includeArchived ? ['list', '--archived'] : ['list']
-  const rows = await kanbanJson<RawTask[]>(args, opts.board)
-  return rows.map(toTask)
+  const board = effectiveBoard(opts.board)
+  const rows = await kanbanJson<RawTask[]>(args, board)
+  return rows.map((r) => toTask(r, board || undefined))
 }
 
 /**
@@ -195,8 +244,8 @@ export type TaskDetail = {
   children: string[]
 }
 
-export async function getTaskDetail(id: string): Promise<TaskDetail | null> {
-  const out = await kanban(['show', id, '--json']).catch(() => '')
+export async function getTaskDetail(id: string, board?: string): Promise<TaskDetail | null> {
+  const out = await kanban(['show', id, '--json'], board).catch(() => '')
   const start = out.search(/[[{]/)
   if (start < 0) return null
   try {
@@ -221,8 +270,9 @@ export async function getTaskDetail(id: string): Promise<TaskDetail | null> {
   }
 }
 
-export async function getTask(id: string): Promise<Task | null> {
-  const out = await kanban(['show', id, '--json']).catch(() => '')
+export async function getTask(id: string, board?: string): Promise<Task | null> {
+  const useBoard = effectiveBoard(board)
+  const out = await kanban(['show', id, '--json'], useBoard).catch(() => '')
   const start = out.search(/[[{]/)
   if (start < 0) return null
   const parsed = JSON.parse(out.slice(start)) as RawTask | { task?: RawTask; parents?: unknown }
@@ -232,7 +282,7 @@ export async function getTask(id: string): Promise<Task | null> {
   const parents = 'parents' in parsed && Array.isArray(parsed.parents)
     ? parsed.parents.filter((p): p is string => typeof p === 'string')
     : []
-  return { ...toTask(raw), parents }
+  return { ...toTask(raw, useBoard || undefined), parents }
 }
 
 export async function createTask(input: NewTaskInput): Promise<Task> {
@@ -246,10 +296,10 @@ export async function createTask(input: NewTaskInput): Promise<Task> {
 
   const out = await kanban(args)
   const m = out.match(/t_[0-9a-f]{8}/)
-  if (!m) throw new Error(`could not read the new task id from: ${out.trim().slice(0, 200)}`)
+  if (!m) throw new Error(`Không thể đọc ID công việc mới từ: ${out.trim().slice(0, 200)}`)
 
   const task = await getTask(m[0])
-  if (!task) throw new Error(`created ${m[0]} but could not read it back`)
+  if (!task) throw new Error(`Đã tạo ${m[0]} nhưng không thể đọc lại`)
   return task
 }
 
@@ -289,8 +339,13 @@ export async function readRunningKanbanCards(board?: string): Promise<RunningRea
  * agent owns" means the tasks visible on the wall.
  */
 export async function tasksForAssignee(name: string): Promise<Task[]> {
-  const all = await listTasks({ includeArchived: true })
-  return all.filter((t) => t.assignee === name)
+  const clean = validateAssigneeName(name)
+  // Every board, not just the one on screen: "does this profile still own work" must not
+  // answer "no" because the work sits on another project's board.
+  const boards = await listBoards().catch(() => null)
+  const slugs = boards?.length ? boards.map((b) => b.slug) : [effectiveBoard()]
+  const all = (await Promise.all(slugs.map((b) => listTasks({ includeArchived: true, board: b || undefined })))).flat()
+  return all.filter((t) => t.assignee === clean)
 }
 
 /**
@@ -443,7 +498,7 @@ async function hermesJson<T>(args: string[]): Promise<T> {
   const out =
     hit && Date.now() - hit.at < READ_TTL_MS
       ? hit.out
-      : await run(HERMES_BIN, args, { env: cleanEnv(), timeout: TIMEOUT_MS, maxBuffer: 8 * 1024 * 1024 })
+      : await exec(HERMES_BIN, args, { env: cleanEnv(), timeout: TIMEOUT_MS, maxBuffer: 8 * 1024 * 1024 })
           .then(({ stdout }) => {
             readCache.set(cacheKey, { at: Date.now(), out: stdout })
             return stdout
@@ -504,19 +559,24 @@ export async function profileCustomProviders(name: string): Promise<RawProvider[
 
 /** Set a profile's default model (and provider). Affects its next spawn/chat turn.
  *
- * When the provider is a `custom:<name>` slug, the matching `custom_providers`
- * DEFINITION is copied from the global config (the same source the model picker
- * reads via `listModels()`) into the profile's own config, then read back to
- * prove it landed. A profile-scoped `model.provider` without a profile-scoped
- * definition is rejected by the CLI as "Unknown provider", so a dangling write
- * is worse than a refusal: resolve first, throw honestly, never half-write.
+ * SAFETY (HVO-04): the old code read the GLOBAL `custom_providers` entry (which
+ * the CLI masks) and copied `[match]` into the profile, replacing the profile's
+ * whole provider catalogue with one redacted object. That can destroy other
+ * provider definitions and write `***` where a key belongs.
+ *
+ * New contract: model-setting is allowed only when the provider is ALREADY
+ * defined in that profile. It writes only `model.default` / `model.provider`;
+ * it never copies a provider definition and never replaces the catalogue. If
+ * the profile lacks the definition, refuse BEFORE writing anything and tell the
+ * operator to set it up manually with their own credential.
  */
 export async function setProfileModel(
   name: string,
   model: string | null,
   provider?: string | null,
 ): Promise<void> {
-  if (!model) throw new Error('model wajib diisi')
+  if (!model) throw new Error('Bắt buộc chọn mô hình')
+  const cleanName = validateProfileName(name)
   // The picker's providers all come from `custom_providers`, and a profile's
   // `model.provider` has to be the QUALIFIED slug (`custom:9router`) — that is
   // what `hermes model` itself writes. A bare name is accepted by
@@ -531,48 +591,26 @@ export async function setProfileModel(
       ? qualified.trim().slice('custom:'.length).trim().toLowerCase()
       : null
   // Resolve the definition BEFORE touching the profile: never leave a
-  // half-written config behind.
-  let defJson: string | null = null
+  // half-written config behind, and never copy a masked global entry.
   if (customName) {
-    const global = await kanbanConfig<RawProvider[]>('custom_providers').catch(
-      () => [] as RawProvider[],
-    )
-    const list = Array.isArray(global) ? global : []
-    const match = list.find((p) => String(p?.name || '').trim().toLowerCase() === customName)
+    const own = await profileCustomProviders(cleanName).catch(() => null)
+    if (own === null) {
+      throw new Error(
+        `Danh sách custom_providers của hồ sơ "${cleanName}" không đọc được — KHÔNG thay đổi model/provider`,
+      )
+    }
+    const match = own.find((p) => String(p?.name || '').trim().toLowerCase() === customName)
     if (!match || !String(match.base_url || '').trim()) {
       throw new Error(
-        `provider "${qualified}" tidak dikenal — tidak ada definisi custom_providers bernama "${customName}" di config global; model profil "${name}" tidak diubah`,
+        `Nhà cung cấp "${qualified}" chưa được định nghĩa trong hồ sơ "${cleanName}" — KHÔNG thay đổi model/provider. ` +
+          `Hãy tự định nghĩa nhà cung cấp trong phạm vi hồ sơ bằng thông tin xác thực thật của bạn ` +
+          `(không sao chép đầu ra config-get đã che thông tin), rồi chọn lại mô hình.`,
       )
     }
-    defJson = JSON.stringify([match])
   }
-  // Definition first, then model+provider: a crash between writes leaves the
-  // harmless case (unused definition) rather than the fatal one (dangling provider).
-  if (defJson) {
-    await hermesWrite(['-p', name, 'config', 'set', 'custom_providers', defJson])
-  }
-  await hermesWrite(['-p', name, 'config', 'set', 'model.default', model])
+  await hermesWrite(['-p', cleanName, 'config', 'set', 'model.default', model])
   if (qualified) {
-    await hermesWrite(['-p', name, 'config', 'set', 'model.provider', qualified])
-  }
-  if (customName && defJson) {
-    // Read back: prove the definition actually landed in profile scope.
-    const landed = await hermesJson<RawProvider[]>([
-      '-p',
-      name,
-      'config',
-      'get',
-      'custom_providers',
-      '--json',
-    ]).catch(() => [] as RawProvider[])
-    const ok =
-      Array.isArray(landed) &&
-      landed.some((p) => String(p?.name || '').trim().toLowerCase() === customName)
-    if (!ok) {
-      throw new Error(
-        `definisi provider "${qualified}" gagal terverifikasi di profil "${name}" — model.default/model.provider sudah tertulis tapi chat bisa gagal ("Unknown provider"); salin manual: hermes -p ${name} config set custom_providers '<json definisi ${customName} dari config global>'`,
-      )
-    }
+    await hermesWrite(['-p', cleanName, 'config', 'set', 'model.provider', qualified])
   }
 }
 
@@ -635,7 +673,7 @@ export async function ensureA2aToolset(name: string): Promise<{ added: boolean; 
   await hermesWrite(['-p', name, 'config', 'set', 'platform_toolsets.cli', JSON.stringify(merged)])
   const after = await profileToolsets(name)
   if (!after || !after.some((t) => t.trim().toLowerCase() === 'a2a')) {
-    throw new Error(`toolset a2a gagal terverifikasi di profil "${name}" — tulis tidak mendarat`)
+    throw new Error(`Không xác minh được bộ công cụ a2a trong hồ sơ "${name}" — thay đổi chưa được ghi nhận`)
   }
   return { added: true, toolsets: after }
 }
@@ -722,14 +760,14 @@ export async function ensureA2aPeer(
   const url = peerEntryUrl(clean)
   const peers = await listA2aPeers()
   if (peers === null) {
-    throw new Error(`daftar peer a2a_agents tak terbaca — peer \"${key}\" tidak bisa dipastikan`)
+    throw new Error(`Không thể đọc danh sách peer a2a_agents — peer \"${key}\" không thể xác định`)
   }
   let added = false
   if (!(peers[key] && samePeerUrl(String(peers[key]?.url ?? ''), url))) {
     await hermesWrite(['config', 'set', `a2a_agents.${key}`, JSON.stringify({ url, timeout: 120 }), '--force'])
     const after = await listA2aPeers()
     if (!after?.[key] || !samePeerUrl(String(after[key]?.url ?? ''), url)) {
-      throw new Error(`peer \"${key}\" gagal terverifikasi — tulis tidak mendarat`)
+      throw new Error(`peer \"${key}\" không xác minh được — thay đổi chưa được ghi nhận`)
     }
     added = true
   }
@@ -739,13 +777,13 @@ export async function ensureA2aPeer(
     if (!caller || caller === clean) continue
     const mine = await listProfilePeers(caller)
     if (mine === null) {
-      throw new Error(`peer profil \"${caller}\" tak terbaca — peer \"${key}\" tidak bisa dipastikan`)
+      throw new Error(`Peer của hồ sơ \"${caller}\" không đọc được — peer \"${key}\" không thể xác định`)
     }
     if (mine[key] && samePeerUrl(String(mine[key]?.url ?? ''), url)) continue
     await hermesWrite(['-p', caller, 'config', 'set', `a2a_agents.${key}`, JSON.stringify({ url, timeout: 120 }), '--force'])
     const re = await listProfilePeers(caller)
     if (!re?.[key] || !samePeerUrl(String(re[key]?.url ?? ''), url)) {
-      throw new Error(`peer \"${key}\" gagal terverifikasi di profil \"${caller}\" — tulis tidak mendarat`)
+      throw new Error(`peer \"${key}\" không xác minh được trong hồ sơ \"${caller}\" — thay đổi chưa được ghi nhận`)
     }
     profileAdded.push(caller)
   }
@@ -786,41 +824,36 @@ export async function removeA2aPeer(
   return { removed, key, profileRemoved }
 }
 /**
- * Tambal definisi provider menggantung di scope profil (SELFREPAIR-1).
+ * HVO-04: provider-definition repair is intentionally NOT automated.
  *
- * Menyalin definisi `custom_providers` bernama `<nama>` dari config global ke
- * scope profil — langkah yang SAMA dengan setProfileModel (MODEL-PROVIDER-1),
- * tapi untuk profil yang providernya menggantung TANPA ganti model.
- * Verifikasi baca-balik; throw jujur bila definisi tak dikenal di global.
+ * The only catalogue available here is the CLI's redacted one. Copying an entry
+ * from it can replace the profile's provider array and write a masked API key as
+ * if it were real. The safe action is to refuse and tell the operator to define
+ * the provider manually with their own credential. Model/provider state is left
+ * untouched.
  */
 export async function ensureProviderDef(name: string, provider: string): Promise<{ copied: boolean }> {
-  const need = provider.trim().slice('custom:'.length).trim().toLowerCase()
-  const global = await kanbanConfig<RawProvider[]>('custom_providers').catch(
-    () => [] as RawProvider[],
+  const cleanName = validateProfileName(name)
+  const p = provider.trim()
+  const own = await profileCustomProviders(cleanName).catch(() => null)
+  if (own === null) {
+    throw new Error(`custom_providers của hồ sơ "${cleanName}" không đọc được — định nghĩa nhà cung cấp "${p}" KHÔNG được sao chép`)
+  }
+  const need = p.toLowerCase().startsWith('custom:') ? p.slice('custom:'.length).trim().toLowerCase() : p.toLowerCase()
+  const found = own.some((x) => String(x?.name || '').trim().toLowerCase() === need)
+  if (found) return { copied: false }
+  throw new Error(
+    `Nhà cung cấp "${p}" chưa được định nghĩa trong hồ sơ "${cleanName}" — tính năng sao chép tự động ĐÃ TẮT ` +
+      `vì config-get che api_key. Hãy tự định nghĩa nhà cung cấp bằng thông tin xác thực thật; ` +
+      `model/provider hiện có không bị thay đổi.`,
   )
-  const list = Array.isArray(global) ? global : []
-  const match = list.find((p) => String(p?.name || '').trim().toLowerCase() === need)
-  if (!match || !String(match.base_url || '').trim()) {
-    throw new Error(
-      `provider "${provider.trim()}" tidak dikenal — tidak ada definisi custom_providers bernama "${need}" di config global; profil "${name}" tidak diubah`,
-    )
-  }
-  await hermesWrite(['-p', name, 'config', 'set', 'custom_providers', JSON.stringify([match])])
-  const landed = await profileCustomProviders(name).catch(() => null)
-  const ok =
-    Array.isArray(landed) &&
-    landed.some((p) => String(p?.name || '').trim().toLowerCase() === need)
-  if (!ok) {
-    throw new Error(`definisi provider "${provider.trim()}" gagal terverifikasi di profil "${name}"`)
-  }
-  return { copied: true }
 }
 
 /** A TOP-LEVEL write: same cleanEnv contract, no `kanban` prefix. */
 async function hermesWrite(args: string[]): Promise<string> {
   readCache.clear()
   try {
-    const { stdout } = await run(HERMES_BIN, args, {
+    const { stdout } = await exec(HERMES_BIN, args, {
       env: cleanEnv(),
       timeout: TIMEOUT_MS,
       maxBuffer: 8 * 1024 * 1024,
@@ -828,7 +861,7 @@ async function hermesWrite(args: string[]): Promise<string> {
     return stdout
   } catch (err) {
     const e = err as NodeJS.ErrnoException & { stderr?: string }
-    throw new Error(`hermes ${args.join(' ')} failed: ${(e.stderr || e.message || '').trim()}`)
+    throw new Error(`hermes ${args.join(' ')} thất bại: ${errorTail(e)}`)
   }
 }
 
@@ -920,9 +953,16 @@ export async function listAssignees(): Promise<{ name: string; onDisk: boolean; 
 
 /* ----------------------------------------------------------------- profiles -- */
 
-/** Where Hermes keeps its state. `HERMES_HOME` wins if the operator set it. */
+/**
+ * Where the Hermes FLEET ROOT lives.
+ *
+ * HVO-07: this is not necessarily `$HERMES_HOME`. A named-profile launch can
+ * have `HERMES_HOME=…/profiles/<name>`; treating that as the fleet root shows
+ * the wrong roster and writes into the wrong profile. `resolveFleetRoot` fails
+ * closed with a diagnostic in that case instead of guessing.
+ */
 export function hermesHome(): string {
-  return process.env.HERMES_HOME || path.join(os.homedir(), '.hermes')
+  return resolveFleetRoot(process.env)
 }
 
 /**
@@ -933,9 +973,13 @@ export function hermesHome(): string {
  * reorder or a long model name, and the office would silently show the wrong
  * roster. A directory containing `config.yaml` is a profile — that is the same
  * thing `hermes profile list` counts.
+ *
+ * HVO-12: access errors other than ENOENT are NOT absence. They are surfaced so
+ * the caller can fail closed rather than silently hiding a profile.
  */
 export async function listProfiles(): Promise<string[]> {
   const out: string[] = []
+  const home = hermesHome()
 
   // `default` is the install's own profile and lives at the Hermes root
   // (~/.hermes/config.yaml), NOT under profiles/. Reading only the profiles/
@@ -943,31 +987,39 @@ export async function listProfiles(): Promise<string[]> {
   // it) while `listProfiles().includes('default')` was false — which made the chat
   // panel list it and then refuse to send to it.
   try {
-    await access(path.join(hermesHome(), 'config.yaml'))
+    await access(path.join(home, 'config.yaml'))
     out.push('default')
-  } catch {
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code
+    if (code !== 'ENOENT') {
+      throw new Error(`Không thể truy cập config.yaml gốc (${code || 'unknown'}): ${(err as Error).message}`)
+    }
     // no root config: a profiles-only install
   }
 
-  const dir = path.join(hermesHome(), 'profiles')
-  try {
-    const entries = await readdir(dir, { withFileTypes: true })
-    for (const e of entries) {
-      if (!e.isDirectory()) continue
-      try {
-        await access(path.join(dir, e.name, 'config.yaml'))
-        out.push(e.name)
-      } catch {
-        // a directory without config.yaml is not a profile
-      }
+  const dir = path.join(home, 'profiles')
+  const entries = await readdir(dir, { withFileTypes: true }).catch((err: NodeJS.ErrnoException) => {
+    if (err.code === 'ENOENT') return null
+    throw new Error(`Không thể đọc thư mục profiles (${err.code || 'unknown'}): ${err.message}`)
+  })
+  if (entries === null) return out.sort()
+  for (const e of entries) {
+    // Never follow symlinks into an arbitrary location: only real directories
+    // directly under profiles/ are candidates.
+    if (!e.isDirectory()) continue
+    const name = e.name.trim().toLowerCase()
+    if (!/^[a-z0-9][a-z0-9_-]{0,63}$/.test(name)) continue
+    try {
+      await access(path.join(dir, e.name, 'config.yaml'))
+      out.push(name)
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code
+      if (code === 'ENOENT') continue // a directory without config.yaml is not a profile
+      throw new Error(`Hồ sơ "${e.name}" không đọc được (${code || 'unknown'}): ${(err as Error).message}`)
     }
-  } catch {
-    // no profiles/ directory yet
   }
   return out.sort()
 }
-
-const PROFILE_NAME = /^[a-z0-9][a-z0-9_-]{0,63}$/
 
 /**
  * Create a profile.
@@ -976,7 +1028,8 @@ const PROFILE_NAME = /^[a-z0-9][a-z0-9_-]{0,63}$/
  * which carries its model, provider and API keys. Spawning an office worker must
  * not hand it someone else's credentials. The new profile starts empty and
  * inherits from the shell environment, exactly as `hermes profile create` does
- * without flags.
+ * without flags. `--no-skills` is passed explicitly so bundled skills are not
+ * installed by surprise (the documented contract).
  *
  * `--no-alias` skips wrapper-script creation; the office drives the profile
  * through the kanban CLI, which does not need a shell alias.
@@ -995,29 +1048,24 @@ export async function createProfile(
   name: string,
   opts?: { description?: string; role?: AgentRole; division?: AgentDivision; soul?: string; domains?: string[] },
 ): Promise<{ name: string; description: string; role: AgentRole; division: AgentDivision; domains: string[] }> {
-  const clean = name.trim().toLowerCase()
-  if (!PROFILE_NAME.test(clean)) {
-    throw new Error(
-      'nama profil harus huruf kecil/angka (boleh - dan _), maksimal 64 karakter',
-    )
-  }
+  const clean = validateProfileName(name)
   const existing = await listProfiles()
   if (existing.includes(clean)) {
-    throw new Error(`profil "${clean}" sudah ada`)
+    throw new Error(`Hồ sơ "${clean}" đã tồn tại`)
   }
   const role: AgentRole = opts?.role ?? roleFor(clean)
   const division: AgentDivision = opts?.division ?? divisionFor(role)
   const domains = parseDomains(opts?.domains?.join(','))
   const desc = (opts?.description || `${clean} — ${role}, divisi ${division}`).trim().slice(0, 200)
-  const args = ['profile', 'create', clean, '--no-alias', '--description', desc]
+  const args = ['profile', 'create', clean, '--no-alias', '--no-skills', '--description', desc]
   try {
-    await run(HERMES_BIN, args, { env: cleanEnv(), timeout: 60_000, maxBuffer: 8 * 1024 * 1024 })
+    await exec(HERMES_BIN, args, { env: cleanEnv(), timeout: 60_000, maxBuffer: 8 * 1024 * 1024 })
   } catch (err) {
     const e = err as NodeJS.ErrnoException & { stderr?: string }
     if (e.code === 'ENOENT') {
-      throw new Error(`Hermes CLI not found at "${HERMES_BIN}".`)
+      throw new Error(`Không tìm thấy Hermes CLI tại "${HERMES_BIN}".`)
     }
-    throw new Error(`hermes profile create ${clean} failed: ${(e.stderr || e.message || '').trim()}`)
+    throw new Error(`hermes profile create ${clean} thất bại: ${errorTail(e)}`)
   }
   // Soul: 1 prompt dari form → SOUL.md profil. Kosong → template per role.
   // Marker ikut menyimpan domains (pemetaan office, bukan A2A). Soul kustom
@@ -1026,7 +1074,7 @@ export async function createProfile(
   const soulWithMarker = /office:\s*role=/i.test(soulText)
     ? soulText
     : `${soulText}\n<!-- office: role=${role} division=${division}${domains.length ? ` domains=${domains.join(',')}` : ''} -->`
-  const dir = path.join(hermesHome(), 'profiles', clean)
+  const dir = profileDir(hermesHome(), clean)
   await writeFile(path.join(dir, 'SOUL.md'), soulWithMarker, 'utf8')
   // describe: catat role/divisi supaya terbaca tanpa buka SOUL.md
   await hermesWrite(['profile', 'describe', clean, `${desc} [${role}/${division}]`]).catch(() => {})
@@ -1047,8 +1095,9 @@ export async function createProfile(
  * active profile.
  */
 async function gatewayRunning(name: string): Promise<boolean> {
+  const clean = validateProfileName(name)
   const home = hermesHome()
-  const dir = name === 'default' ? home : path.join(home, 'profiles', name)
+  const dir = clean === 'default' ? home : profileDir(home, clean)
   try {
     const raw = await readFile(path.join(dir, 'gateway.pid'), 'utf8')
     const pid = Number(JSON.parse(raw)?.pid)
@@ -1060,15 +1109,22 @@ async function gatewayRunning(name: string): Promise<boolean> {
         // stale file from a process that has exited
       }
     }
-  } catch {
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code
+    if (code !== 'ENOENT') {
+      throw new Error(`gateway.pid của hồ sơ "${clean}" không đọc được (${code || 'unknown'}) — không thể xác định trạng thái gateway`)
+    }
     // no pid file: either stopped, or served by the multiplexer (checked below)
   }
   try {
     const state = JSON.parse(await readFile(path.join(home, 'gateway_state.json'), 'utf8'))
     const served = Array.isArray(state?.served_profiles) ? state.served_profiles : []
-    if (served.includes(name)) return true
-  } catch {
-    // no state file
+    if (served.includes(clean)) return true
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code
+    if (code !== 'ENOENT') {
+      throw new Error(`Không thể đọc gateway_state.json (${code || 'unknown'}) — không thể xác định trạng thái gateway`)
+    }
   }
   return false
 }
@@ -1090,22 +1146,19 @@ async function gatewayRunning(name: string): Promise<boolean> {
  * owns confirmation and the API is not a terminal.
  */
 export async function deleteProfile(name: string): Promise<void> {
-  const clean = name.trim().toLowerCase()
-  if (!clean) throw new Error('nama profil wajib diisi')
-  if (clean === 'default') {
-    throw new Error('profil "default" tidak bisa dihapus')
-  }
+  if (!String(name ?? '').trim()) throw new Error('Bắt buộc nhập tên hồ sơ')
+  const clean = validateProfileName(name)
   const profiles = await listProfiles()
   if (!profiles.includes(clean)) {
-    throw new Error(`profil "${clean}" tidak ada di disk`)
+    throw new Error(`Hồ sơ "${clean}" không tồn tại trên đĩa`)
   }
   if (await gatewayRunning(clean)) {
     throw new Error(
-      `gateway profil "${clean}" sedang berjalan — hentikan dulu sebelum dihapus`,
+      `gateway của hồ sơ "${clean}" đang chạy — hãy dừng trước khi xóa`,
     )
   }
   try {
-    await run(HERMES_BIN, ['profile', 'delete', clean, '--yes'], {
+    await exec(HERMES_BIN, ['profile', 'delete', clean, '--yes'], {
       env: cleanEnv(),
       timeout: 60_000,
       maxBuffer: 8 * 1024 * 1024,
@@ -1113,9 +1166,9 @@ export async function deleteProfile(name: string): Promise<void> {
   } catch (err) {
     const e = err as NodeJS.ErrnoException & { stderr?: string }
     if (e.code === 'ENOENT') {
-      throw new Error(`Hermes CLI not found at "${HERMES_BIN}".`)
+      throw new Error(`Không tìm thấy Hermes CLI tại "${HERMES_BIN}".`)
     }
-    throw new Error(`hermes profile delete ${clean} failed: ${(e.stderr || e.message || '').trim()}`)
+    throw new Error(`hermes profile delete ${clean} thất bại: ${errorTail(e)}`)
   }
 }
 
@@ -1124,12 +1177,15 @@ export async function deleteProfile(name: string): Promise<void> {
  * `default` tinggal di root Hermes, bukan di profiles/.
  */
 async function readSoul(name: string): Promise<string | null> {
+  const clean = validateProfileName(name, { allowDefault: true })
   const home = hermesHome()
-  const p = name === 'default' ? path.join(home, 'SOUL.md') : path.join(home, 'profiles', name, 'SOUL.md')
+  const p = clean === 'default' ? path.join(home, 'SOUL.md') : path.join(profileDir(home, clean), 'SOUL.md')
   try {
     return await readFile(p, 'utf8')
-  } catch {
-    return null
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code
+    if (code === 'ENOENT') return null
+    throw new Error(`SOUL.md của hồ sơ "${clean}" không đọc được (${code || 'unknown'}): ${(err as Error).message}`)
   }
 }
 
@@ -1140,11 +1196,29 @@ async function readSoul(name: string): Promise<string | null> {
  */
 export function activeTaskByAssignee(tasks: Task[]): Map<string, Task> {
   const active = new Map<string, Task>()
+  const rank = (t: Task) => (t.status === 'running' ? 2 : t.status === 'review' ? 1 : 0)
   for (const t of tasks) {
-    if (!t.assignee) continue
-    if (t.status === 'running' || t.status === 'review') active.set(t.assignee, t)
+    if (!t.assignee || !rank(t)) continue
+    const prev = active.get(t.assignee)
+    // Running beats review. On a tie the later row wins only within the same board (the
+    // single-board behaviour as before); across boards the earlier one — the board on
+    // screen, which activeTasksAllBoards lists first — keeps the avatar.
+    if (!prev || rank(t) > rank(prev) || (rank(t) === rank(prev) && (prev.board ?? '') === (t.board ?? ''))) {
+      active.set(t.assignee, t)
+    }
   }
   return active
+}
+
+/** Whether an assignee may become an avatar (strict profile-name rules; never throws). */
+export function isAvatarName(name: unknown): name is string {
+  if (typeof name !== 'string') return false
+  try {
+    validateProfileName(name, { allowDefault: true })
+    return true
+  } catch {
+    return false
+  }
 }
 
 export async function listAgents(
@@ -1157,7 +1231,19 @@ export async function listAgents(
   // Profiles AND assignees. Reading only `assignees` meant a freshly created
   // profile stayed invisible until it was given a task, so "create a profile"
   // looked like it had done nothing.
-  const names = [...new Set([...raw.map((r) => r.name), ...(await listProfiles())])].sort()
+  // + whoever holds a running/review card on ANY board (all-board avatar status): an agent
+  // busy only on another board must still get a desk. Names the office would refuse are skipped.
+  const busyNames = tasks
+    .filter((t) => t.assignee && (t.status === 'running' || t.status === 'review'))
+    .map((t) => t.assignee as string)
+    .filter((n) => /^[a-z0-9][a-z0-9_-]{0,63}$/.test(n))
+  // An assignee the office would refuse as a profile name (e.g. >64 chars, a path) gets
+  // no avatar — readSoul/desk/CLI keep their strict validation — but it must not take the
+  // whole board down: before, one such card made /api/hermes/tasks answer 503. The card
+  // itself still lists, with its raw assignee text (React-escaped, ellipsised in the UI).
+  const names = [...new Set([...raw.map((r) => r.name), ...(await listProfiles()), ...busyNames])]
+    .filter(isAvatarName)
+    .sort()
 
   const active = activeTaskByAssignee(tasks)
 
@@ -1200,6 +1286,8 @@ export async function listAgents(
       deskIndex: seatOf.get(name) ?? null,
       status,
       currentTaskId: task?.id ?? null,
+      currentTaskBoard: task?.board ?? null,
+      currentTaskTitle: task?.title ?? null,
     }
   })
 }
@@ -1311,7 +1399,7 @@ function lastRunOf<T extends { id: number }>(runs: T[] | undefined): T | null {
  */
 async function showStrict(id: string): Promise<RawShow & { task: RawTask }> {
   const parsed = await kanbanJson<RawShow>(['show', id])
-  if (!parsed?.task?.id) throw new Error(`tugas "${id}" tidak terbaca dari kanban show`)
+  if (!parsed?.task?.id) throw new Error(`Công việc "${id}" không đọc được từ kanban show`)
   return parsed as RawShow & { task: RawTask }
 }
 
@@ -1436,7 +1524,7 @@ export type TaskVerification = VerificationReading & {
 
 export async function getTaskVerification(id: string): Promise<TaskVerification> {
   const parsed = await kanbanJson<{ task?: RawTask; events?: VerifyEvent[] }>(['show', id])
-  if (!parsed?.task?.id) throw new Error(`tugas "${id}" tidak terbaca dari kanban show`)
+  if (!parsed?.task?.id) throw new Error(`Công việc "${id}" không đọc được từ kanban show`)
   const task = toTask(parsed.task)
   const reading = readVerification(task, Array.isArray(parsed.events) ? parsed.events : [])
   return {
@@ -1467,7 +1555,7 @@ export async function verificationMarks(ids: string[]): Promise<VerificationMark
       const id = checked[i]
       try {
         const shown = await kanbanJson<{ task?: RawTask; events?: VerifyEvent[] }>(['show', id])
-        if (!shown?.task?.id) throw new Error(`tugas "${id}" tidak terbaca dari kanban show`)
+        if (!shown?.task?.id) throw new Error(`Công việc "${id}" không đọc được từ kanban show`)
         const task = toTask(shown.task)
         out[i] = {
           id,
@@ -1526,4 +1614,123 @@ export async function advanceTask(
 export async function steerTask(taskId: string, instruction: string): Promise<boolean> {
   await kanban(['comment', taskId, instruction])
   return true
+}
+
+/* ----------------------------------------------------------------- boards -- */
+
+/** One board as the office shows it. No `db_path` / workdir: filesystem paths stay server-side. */
+export type BoardInfo = {
+  slug: string
+  name: string
+  icon: string
+  color: string
+  description: string
+  total: number
+  counts: Record<string, number>
+  /** The CLI's own "current" board (what `--board`-less calls hit). */
+  current: boolean
+}
+
+type RawBoard = {
+  slug?: unknown
+  name?: unknown
+  icon?: unknown
+  color?: unknown
+  description?: unknown
+  archived?: unknown
+  is_current?: unknown
+  counts?: unknown
+  total?: unknown
+}
+
+const BOARDS_TTL_MS = 15_000
+let boardsMemo: { at: number; data: BoardInfo[] } | null = null
+
+/** Test-only: forget the memoised board list. */
+export function _resetBoardCachesForTest(): void {
+  boardsMemo = null
+  activeMemo = null
+}
+
+/**
+ * `hermes kanban boards list --json` (read-only), memoised 15 s. Archived boards and rows
+ * with a slug the office would refuse are dropped.
+ */
+export async function listBoards(): Promise<BoardInfo[]> {
+  if (boardsMemo && Date.now() - boardsMemo.at < BOARDS_TTL_MS) return boardsMemo.data
+  const raw = await kanbanJson<RawBoard[]>(['boards', 'list'], null)
+  const data: BoardInfo[] = (Array.isArray(raw) ? raw : [])
+    .filter((b) => b && b.archived !== true && typeof b.slug === 'string' && /^[a-z0-9][a-z0-9_-]{0,63}$/.test(b.slug))
+    .map((b) => {
+      const counts: Record<string, number> = {}
+      if (b.counts && typeof b.counts === 'object') {
+        for (const [k, v] of Object.entries(b.counts as Record<string, unknown>)) {
+          if (typeof v === 'number' && Number.isFinite(v)) counts[k] = v
+        }
+      }
+      return {
+        slug: b.slug as string,
+        name: typeof b.name === 'string' && b.name.trim() ? b.name.trim() : (b.slug as string),
+        icon: typeof b.icon === 'string' ? b.icon.slice(0, 8) : '',
+        color: typeof b.color === 'string' && /^#[0-9a-fA-F]{3,8}$/.test(b.color) ? b.color : '',
+        description: typeof b.description === 'string' ? b.description.slice(0, 300) : '',
+        total: typeof b.total === 'number' ? b.total : Object.values(counts).reduce((a, n) => a + n, 0),
+        counts,
+        current: b.is_current === true,
+      }
+    })
+  boardsMemo = { at: Date.now(), data }
+  return data
+}
+
+/** The slug a board-less request means: `HERMES_KANBAN_BOARD`, else the CLI's current board. */
+export function defaultBoardSlug(boards: BoardInfo[]): string {
+  return BOARD || boards.find((b) => b.current)?.slug || boards[0]?.slug || 'default'
+}
+
+/**
+ * Tasks that make an agent BUSY (running / review), across EVERY board.
+ *
+ * Avatars in the office belong to profiles, and a profile works on whichever board its task
+ * lives on — so "working" must not depend on which board the Kanban happens to show.
+ *
+ * CLI cost: one `list --json` per OTHER board (the selected board's rows are passed in, so
+ * it costs nothing extra), memoised ACTIVE_TTL_MS. With the 4 s poll that is at most one
+ * `list` per extra board every 10 s, plus `boards list` every 15 s. A board that fails to
+ * read is skipped, not fatal: one broken board must not make the whole office look idle.
+ */
+const ACTIVE_TTL_MS = 10_000
+let activeMemo: { at: number; key: string; data: Task[] } | null = null
+
+/** Rows that came from a board other than the one on screen (see activeTasksAllBoards). */
+const OTHER_BOARD_ROWS = new WeakSet<Task>()
+export function isOtherBoardRow(t: Task): boolean {
+  return OTHER_BOARD_ROWS.has(t)
+}
+
+export async function activeTasksAllBoards(selected: Task[], selectedBoard: string): Promise<Task[]> {
+  const busy = (t: Task) => t.status === 'running' || t.status === 'review'
+  const own = selected.filter(busy)
+  let boards: BoardInfo[]
+  try {
+    boards = await listBoards()
+  } catch {
+    return own
+  }
+  const sel = selectedBoard || defaultBoardSlug(boards)
+  const others = boards.map((b) => b.slug).filter((s) => s !== sel)
+  const key = others.join(',')
+  let rest: Task[]
+  if (activeMemo && activeMemo.key === key && Date.now() - activeMemo.at < ACTIVE_TTL_MS) {
+    rest = activeMemo.data
+  } else {
+    const lists = await Promise.all(others.map((b) => listTasks({ board: b }).catch(() => [] as Task[])))
+    rest = lists.flat().filter(busy)
+    for (const t of rest) OTHER_BOARD_ROWS.add(t)
+    activeMemo = { at: Date.now(), key, data: rest }
+  }
+  // Rows of the board on screen keep whatever board listTasks gave them: when it is the
+  // unscoped default they stay board-less, so their `show` calls share the read cache with
+  // the rest of the office instead of a second `--board default` copy.
+  return [...own, ...rest]
 }

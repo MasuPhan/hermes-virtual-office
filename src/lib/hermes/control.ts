@@ -23,12 +23,14 @@
  */
 
 import { existsSync, readFileSync } from 'node:fs'
-import { homedir } from 'node:os'
 import { join } from 'node:path'
+import { resolveFleetRoot } from './root'
 import type { AgentRole } from '@/types/hermes'
 
-const HERMES = process.env.HERMES_HOME || join(homedir(), '.hermes')
-const ESTOP = join(HERMES, 'ESTOP')
+/** ESTOP lives at the explicit fleet root, not a named-profile home. */
+export function estopPath(): string {
+  return join(resolveFleetRoot(process.env), 'ESTOP')
+}
 
 /** Aksi yang boleh diminta dari UI. Daftar tertutup — bukan string bebas. */
 export type ActionKind =
@@ -67,20 +69,20 @@ export function checkAction(req: ActionRequest): Verdict {
   const needsTask: ActionKind[] = ['unblock', 'promote', 'release']
   if (needsTask.includes(req.action)) {
     if (!req.taskId || !/^t_[0-9a-f]{8}$/.test(req.taskId)) {
-      return { allowed: false, why: `${req.action} butuh id task yang sah` }
+      return { allowed: false, why: `${req.action} cần ID công việc hợp lệ` }
     }
   }
   // Menghentikan kerja SELURUH SISTEM wajib punya alasan. Tanpa itu, catatannya cuma
   // "seseorang menjeda semuanya" — dan di situlah orang berdebat nanti.
   if (req.action === 'pauseAll') {
     const r = (req.reason || '').trim()
-    if (r.length < 3) return { allowed: false, why: 'menghentikan seluruh kerja wajib disertai alasan' }
+    if (r.length < 3) return { allowed: false, why: 'Phải nêu lý do khi dừng toàn bộ công việc' }
   }
   // Membuka blokir juga wajib beralasan: itu catatan kenapa blokirnya dicabut, dan di papan
   // ia muncul sebagai komentar yang bisa dibaca ulang.
   if (req.action === 'unblock') {
     const r = (req.reason || '').trim()
-    if (r.length < 3) return { allowed: false, why: 'membuka blokir wajib disertai alasan' }
+    if (r.length < 3) return { allowed: false, why: 'Phải nêu lý do khi bỏ chặn' }
   }
   return { allowed: true }
 }
@@ -103,13 +105,13 @@ export type AgentActionKind = 'pauseAll' | 'spawn' | 'kill' | 'create' | 'setMod
 export const AGENT_ACTIONS: AgentActionKind[] = ['pauseAll', 'spawn', 'kill', 'create', 'setModel', 'steer', 'advance']
 
 export const AGENT_ACTION_LABEL: Record<AgentActionKind, string> = {
-  pauseAll: 'jeda semua',
-  spawn: 'spawn/sembunyikan',
-  kill: 'kill',
-  create: 'buat profil',
-  setModel: 'ganti model',
-  steer: 'arahkan task',
-  advance: 'gerakkan task',
+  pauseAll: 'Tạm dừng tất cả',
+  spawn: 'Hiện/ẩn tác tử',
+  kill: 'Xóa tác tử',
+  create: 'Tạo hồ sơ',
+  setModel: 'Đổi mô hình',
+  steer: 'Chỉ dẫn công việc',
+  advance: 'Chuyển công việc',
 }
 
 export type AgentPermission = {
@@ -124,11 +126,11 @@ export type AgentPermission = {
 const STAFF: AgentPermission = {
   allow: ['steer', 'advance'],
   deny: {
-    pauseAll: 'agent staff tidak boleh menghentikan seluruh sistem — jeda semua adalah keputusan operator atau orkestrasi',
-    spawn: 'agent staff tidak boleh mengubah siapa yang ada di kantor — memunculkan/menyembunyikan rekan adalah tugas orkestrasi',
-    kill: 'agent staff tidak boleh menghapus agent lain — kill menghapus profil dan seluruh tugasnya permanen',
-    create: 'agent staff tidak boleh membuat profil agent baru — menambah anggota tim adalah keputusan orkestrasi',
-    setModel: 'agent staff tidak boleh mengganti model profil — itu mengubah biaya dan perilaku agent lain',
+    pauseAll: 'Tác tử nhân viên không được dừng toàn hệ thống — chỉ người vận hành hoặc bộ điều phối được quyết định tạm dừng tất cả',
+    spawn: 'Tác tử nhân viên không được thay đổi thành viên trong văn phòng — hiện/ẩn đồng nghiệp là nhiệm vụ điều phối',
+    kill: 'Tác tử nhân viên không được xóa tác tử khác — kill xóa vĩnh viễn hồ sơ cùng toàn bộ công việc',
+    create: 'Tác tử nhân viên không được tạo hồ sơ tác tử mới — thêm thành viên là quyết định của bộ điều phối',
+    setModel: 'Tác tử nhân viên không được đổi mô hình của hồ sơ — việc đó thay đổi chi phí và hành vi của tác tử khác',
   },
   anyTask: false,
 }
@@ -148,8 +150,8 @@ export const AGENT_PERMISSIONS: Record<AgentRole, AgentPermission> = {
   manager: {
     allow: ['spawn', 'create', 'setModel', 'steer', 'advance'],
     deny: {
-      pauseAll: 'manager memimpin satu divisi — menghentikan SELURUH sistem adalah keputusan ceo/orchestrator',
-      kill: 'manager tidak boleh menghapus agent — kill menghapus profil dan tugasnya permanen, minta ceo/orchestrator',
+      pauseAll: 'Quản lý phụ trách một bộ phận — dừng TOÀN BỘ hệ thống là quyết định của ceo/orchestrator',
+      kill: 'Quản lý không được xóa tác tử — kill xóa vĩnh viễn hồ sơ và công việc; hãy yêu cầu ceo/orchestrator',
     },
     anyTask: true,
   },
@@ -182,29 +184,29 @@ export type AgentActionRequest = {
  */
 export function checkAgentAction(req: AgentActionRequest): Verdict {
   const agent = (req.agent || '').trim()
-  if (!agent) return { allowed: false, why: 'aksi atas nama agent butuh nama agent' }
+  if (!agent) return { allowed: false, why: 'Thao tác thay mặt tác tử cần có tên tác tử' }
   const perm = (AGENT_PERMISSIONS as Record<string, AgentPermission | undefined>)[req.role]
-  if (!perm) return { allowed: false, why: `role "${req.role}" tidak dikenal — tidak ada izin untuknya` }
+  if (!perm) return { allowed: false, why: `Vai trò "${req.role}" không xác định — không được cấp quyền` }
   if (!AGENT_ACTIONS.includes(req.action)) {
-    return { allowed: false, why: `aksi "${req.action}" tidak dikenal` }
+    return { allowed: false, why: `Thao tác "${req.action}" không xác định` }
   }
   const denied = perm.deny[req.action]
   if (denied) return { allowed: false, why: `${agent}: ${denied}` }
   if (!perm.allow.includes(req.action)) {
-    return { allowed: false, why: `${agent}: aksi "${req.action}" tidak ada di daftar izin role ${req.role}` }
+    return { allowed: false, why: `${agent}: thao tác "${req.action}" không nằm trong danh sách quyền của vai trò ${req.role}` }
   }
 
   if (req.action === 'steer' || req.action === 'advance') {
     if (!req.taskId || !/^t_[0-9a-f]{8}$/.test(req.taskId)) {
-      return { allowed: false, why: `${req.action} butuh id task yang sah` }
+      return { allowed: false, why: `${req.action} cần ID công việc hợp lệ` }
     }
     if (!perm.anyTask) {
       if (req.taskAssignee === undefined) {
-        return { allowed: false, why: `${agent}: pemilik ${req.taskId} tidak diketahui — hanya boleh menyentuh task miliknya sendiri` }
+        return { allowed: false, why: `${agent}: người phụ trách ${req.taskId} chưa xác định — chỉ được thao tác trên công việc của chính mình` }
       }
       if (req.taskAssignee !== agent) {
-        const owner = req.taskAssignee ? `milik ${req.taskAssignee}` : 'tidak punya pemilik'
-        return { allowed: false, why: `${agent}: ${req.taskId} ${owner}, bukan milik ${agent} — role ${req.role} hanya boleh menyentuh task miliknya sendiri` }
+        const owner = req.taskAssignee ? `thuộc về ${req.taskAssignee}` : 'Không có người phụ trách'
+        return { allowed: false, why: `${agent}: ${req.taskId} ${owner}, không thuộc về ${agent} — vai trò ${req.role} chỉ được thao tác trên công việc của chính mình` }
       }
     }
   }
@@ -242,34 +244,34 @@ export type ActionEffect = {
 
 export const ACTION_EFFECT: Record<ActionKind, ActionEffect> = {
   pauseAll: {
-    label: 'Jeda semua',
-    effect: 'Kerja BARU berhenti: cron, dispatch kanban, turn gateway baru. Kerja yang sedang jalan TIDAK dibunuh.',
+    label: 'Tạm dừng tất cả',
+    effect: 'Dừng công việc MỚI: cron, điều phối kanban, lượt gateway mới. KHÔNG chấm dứt công việc đang chạy.',
     danger: true,
   },
   resumeAll: {
-    label: 'Lanjutkan',
-    effect: 'Dispatch jalan lagi pada tick berikutnya.',
+    label: 'Tiếp tục',
+    effect: 'Tiếp tục điều phối vào nhịp tiếp theo.',
     danger: false,
   },
   unblock: {
-    label: 'Buka blokir',
-    effect: 'Task kembali ke papan dan alasannya dicatat sebagai komentar.',
+    label: 'Bỏ chặn',
+    effect: 'Đưa công việc trở lại bảng và ghi lý do vào bình luận.',
     danger: false,
   },
   promote: {
-    label: 'Dorong ke siap',
-    effect: 'Task kembali ke ready, dispatcher bisa mengambilnya.',
+    label: 'Chuyển sang sẵn sàng',
+    effect: 'Đưa công việc về ready để bộ điều phối có thể nhận.',
     danger: false,
   },
   setFallback: {
-    label: 'Pasang cadangan provider',
+    label: 'Thiết lập nhà cung cấp dự phòng',
     effect:
-      'Chain cadangan ditulis ke config.yaml, dengan cadangan berkas dulu. Ini mengubah provider yang dipakai SELURUH instalasi, termasuk agent yang sedang bekerja.',
+      'Ghi chuỗi dự phòng vào config.yaml sau khi sao lưu tệp. Việc này thay đổi nhà cung cấp cho TOÀN BỘ bản cài đặt, kể cả tác tử đang làm việc.',
     danger: true,
   },
   release: {
-    label: 'Lepas worker',
-    effect: 'Worker yang memegang task dilepas. Pakai ini kalau worker-nya sudah mati tapi task masih tercatat berjalan.',
+    label: 'Giải phóng worker',
+    effect: 'Giải phóng worker đang giữ công việc. Dùng khi worker đã dừng nhưng công việc vẫn được ghi nhận là đang chạy.',
     danger: true,
   },
 }
@@ -290,9 +292,10 @@ export type PauseState = {
  * tetap dihitung JEDA — perilaku yang sama dengan Hermes, "fail safe".
  */
 export function readPause(): PauseState {
-  if (!existsSync(ESTOP)) return { paused: false, reason: null, engagedAt: null }
+  const estop = estopPath()
+  if (!existsSync(estop)) return { paused: false, reason: null, engagedAt: null }
   try {
-    const raw = readFileSync(ESTOP, 'utf8').trim()
+    const raw = readFileSync(estop, 'utf8').trim()
     if (!raw) return { paused: true, reason: null, engagedAt: null }
     const j = JSON.parse(raw) as { reason?: string; engaged_at?: string }
     return { paused: true, reason: j.reason ?? null, engagedAt: j.engaged_at ?? null }
@@ -303,4 +306,4 @@ export function readPause(): PauseState {
   }
 }
 
-export const ESTOP_PATH = ESTOP
+/* ESTOP_PATH removed: use estopPath() so the fleet root is resolved per call. */

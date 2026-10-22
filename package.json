@@ -5,16 +5,20 @@
   "description": "An open-source 3D virtual workspace & meeting simulator for autonomous AI agents.",
   "license": "MIT",
   "engines": {
-    "node": ">=20"
+    "node": ">=22.22.3"
   },
   "scripts": {
     "dev": "NODE_ENV=development next dev --hostname 127.0.0.1 --port 3001",
     "build": "next build",
     "start": "next start --hostname 127.0.0.1",
     "typecheck": "tsc --noEmit",
-    "selftest": "tsx scripts/selftest.ts"
+    "selftest": "tsx scripts/selftest.ts",
+    "safety-regression": "tsx scripts/safety-regression.ts",
+    "localization:coverage": "node --import tsx scripts/localization-coverage.ts",
+    "localization:regression": "node --import tsx scripts/localization-regression.ts"
   },
   "dependencies": {
+    "i18next": "^25.10.10",
     "next": "^15.1.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",

@@ -19,6 +19,9 @@
 import { execFile } from 'node:child_process'
 import { stat } from 'node:fs/promises'
 import { promisify } from 'node:util'
+import { isTrustedHost, isTrustedOrigin } from '../local-guard'
+import { fleetRootEnv } from './root'
+import { errorTail } from './redact'
 
 const run = promisify(execFile)
 
@@ -69,7 +72,7 @@ export function classifyProviderScope(
 
 /** Env tanpa penanda sesi agent — sama kontraknya dengan cleanEnv() di kanban.ts. */
 function cleanEnv(): NodeJS.ProcessEnv {
-  const env = { ...process.env }
+  const env = fleetRootEnv(process.env)
   for (const k of [
     'HERMES_DELEGATED_CHILD_CONTEXT',
     'HERMES_SUPERVISED_CHILD',
@@ -145,12 +148,6 @@ export function needsRestart(configMtimeMs: number, gatewayStartMs: number | nul
   return configMtimeMs > gatewayStartMs
 }
 
-const LOOPBACK = new Set(['localhost', '127.0.0.1', '[::1]'])
-
-function bareHost(host: string): string {
-  return host.replace(/:\d+$/, '')
-}
-
 /**
  * Putusan tulis untuk Host/Origin peminta (cermin read-only doctor).
  *
@@ -169,50 +166,25 @@ export function originVerdict(
   if (!hostHeader || !originHeader) {
     return {
       status: 'unknown',
-      detail: 'tidak bisa dipastikan — diminta tanpa header Origin (curl/server-ke-server; buka dari browser bila butuh nilai pasti)',
+      detail: 'Không thể xác định — yêu cầu thiếu header Origin (curl/máy chủ với máy chủ; mở bằng trình duyệt để có kết quả chắc chắn)',
       fix: '',
     }
   }
-  let host: URL
-  let origin: URL
-  try {
-    host = new URL(`http://${hostHeader}`)
-    origin = new URL(originHeader)
-  } catch {
+  if (!isTrustedHost(hostHeader, allowedRaw)) {
     return {
       status: 'fail',
-      detail: `header Host/Origin tidak terbaca: Host="${hostHeader}" Origin="${originHeader}"`,
-      fix: 'panggil dari browser biasa (bukan curl tanpa header)',
+      detail: `Host "${hostHeader}" không phải loopback và không nằm trong ALLOWED_ORIGINS`,
+      fix: `Thêm "${hostHeader}" vào ALLOWED_ORIGINS trong .env.local rồi khởi động lại`,
     }
   }
-  if (origin.host !== host.host) {
+  if (!isTrustedOrigin(hostHeader, originHeader, allowedRaw)) {
     return {
       status: 'fail',
-      detail: `Origin "${origin.host}" tidak sama dengan Host "${host.host}" — tulisan akan dijawab 403`,
-      fix: `buka kantor lewat alamat yang sama dengan Origin, atau samakan keduanya`,
+      detail: `Origin "${originHeader}" không khớp chính xác (giao thức/host/cổng) với Host/ALLOWED_ORIGINS — yêu cầu ghi sẽ nhận mã 403`,
+      fix: `Mở văn phòng qua cùng origin hoặc thêm chính xác origin đó vào ALLOWED_ORIGINS`,
     }
   }
-  if (origin.protocol !== 'http:') {
-    return {
-      status: 'fail',
-      detail: `skema Origin "${origin.protocol}" bukan http — penjaga tulis hanya menerima http same-origin`,
-      fix: 'buka kantor lewat http:// (atau perbarui penjaga bila sudah https)',
-    }
-  }
-  const allowed = allowedRaw
-    .split(',')
-    .map((s) => s.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/+$/, ''))
-    .filter(Boolean)
-  const h = host.host.toLowerCase()
-  const trusted = LOOPBACK.has(bareHost(h)) || allowed.some((e) => e === h || e === bareHost(h))
-  if (trusted) {
-    return { status: 'pass', detail: `Origin "${origin.host}" sama dengan Host dan dipercaya`, fix: '' }
-  }
-  return {
-    status: 'fail',
-    detail: `"${h}" bukan loopback dan tidak ada di ALLOWED_ORIGINS — tulisan akan dijawab 403`,
-    fix: `tambahkan "${h}" ke ALLOWED_ORIGINS di .env.local, lalu restart`,
-  }
+  return { status: 'pass', detail: `Origin "${originHeader}" trùng với Host và đáng tin cậy`, fix: '' }
 }
 
 /**
@@ -238,18 +210,18 @@ export function fallthroughVerdict(httpOk: boolean, body: string): {
   if (!httpOk) {
     return {
       status: 'pass',
-      detail: 'path tak dikenal ditolak di level HTTP (tidak dijawab agent)',
+      detail: 'Đường dẫn không xác định bị từ chối ở tầng HTTP (không được tác tử trả lời)',
     }
   }
   if (/no agent is served at/i.test(body)) {
     return {
       status: 'pass',
-      detail: 'path tak dikenal ditolak jujur ("no agent is served") — tidak jatuh ke agent default',
+      detail: 'Đường dẫn không xác định bị từ chối đúng thực tế ("no agent is served") — không chuyển về tác tử mặc định',
     }
   }
   return {
     status: 'fail',
-    detail: `path tak dikenal DIJAWAB (fallthrough ke agent default?) — balasan: ${body.slice(0, 160)}`,
+    detail: `Đường dẫn không xác định ĐƯỢC TRẢ LỜI (chuyển về tác tử mặc định?) — phản hồi: ${body.slice(0, 160)}`,
   }
 }
 
@@ -314,21 +286,21 @@ export async function runDoctor(opts: { host: string | null; origin: string | nu
     const e = err as NodeJS.ErrnoException & { stderr?: string }
     checks.push({
       id: 'cli',
-      label: 'Hermes CLI ketemu & bisa dipanggil',
+      label: 'Tìm thấy Hermes CLI và có thể gọi',
       status: 'fail',
       detail:
         e.code === 'ENOENT'
-          ? `tidak ada executable di "${HERMES_BIN}"`
-          : `gagal menjalankan "${HERMES_BIN}": ${(e.stderr || e.message || '').trim().slice(0, 300)}`,
-      fix: `set HERMES_BIN ke path executable hermes (sekarang: "${HERMES_BIN}")`,
+          ? `Không có tệp thực thi tại "${HERMES_BIN}"`
+          : `Không thể chạy "${HERMES_BIN}": ${errorTail(e, 300)}`,
+      fix: `Đặt HERMES_BIN trỏ đến đường dẫn tệp thực thi hermes (hiện tại: "${HERMES_BIN}")`,
     })
   }
   if (cliOk) {
     checks.push({
       id: 'cli',
-      label: 'Hermes CLI ketemu & bisa dipanggil',
+      label: 'Tìm thấy Hermes CLI và có thể gọi',
       status: 'pass',
-      detail: `"${HERMES_BIN}" menjawab: ${cliVersion || '(tanpa versi)'}`,
+      detail: `"${HERMES_BIN}" phản hồi: ${cliVersion || '(không có phiên bản)'}`,
       fix: '',
     })
   }
@@ -346,18 +318,18 @@ export async function runDoctor(opts: { host: string | null; origin: string | nu
     taskCount = tasks.length
     checks.push({
       id: 'board',
-      label: 'Board bisa dibaca',
+      label: 'Đọc được bảng công việc',
       status: 'pass',
-      detail: `${tasks.length} task terbaca lewat CLI`,
+      detail: `${tasks.length} công việc đọc được qua CLI`,
       fix: '',
     })
   } catch (err) {
     checks.push({
       id: 'board',
-      label: 'Board bisa dibaca',
+      label: 'Đọc được bảng công việc',
       status: 'fail',
       detail: (err as Error).message.slice(0, 300),
-      fix: 'perbaiki error di atas apa adanya — biasanya HERMES_BIN atau board yang ditunjuk HERMES_KANBAN_BOARD',
+      fix: 'Khắc phục đúng lỗi phía trên — thường do HERMES_BIN hoặc bảng được chỉ định bởi HERMES_KANBAN_BOARD',
     })
   }
 
@@ -368,27 +340,27 @@ export async function runDoctor(opts: { host: string | null; origin: string | nu
     if (!profiles.length) {
       checks.push({
         id: 'profiles',
-        label: 'Profil agent ada',
+        label: 'Có hồ sơ tác tử',
         status: 'fail',
-        detail: 'tidak ada profil sama sekali',
-        fix: 'bikin dari form Agent, atau: hermes profile create <nama> --no-alias',
+        detail: 'Chưa có hồ sơ nào',
+        fix: 'Tạo từ biểu mẫu Tác tử hoặc chạy: hermes profile create <nama> --no-alias',
       })
     } else {
       checks.push({
         id: 'profiles',
-        label: 'Profil agent ada',
+        label: 'Có hồ sơ tác tử',
         status: 'pass',
-        detail: `${profiles.length} profil: ${profiles.slice(0, 8).join(', ')}${profiles.length > 8 ? ` (+${profiles.length - 8})` : ''}`,
+        detail: `${profiles.length} hồ sơ: ${profiles.slice(0, 8).join(', ')}${profiles.length > 8 ? ` (+${profiles.length - 8})` : ''}`,
         fix: '',
       })
     }
   } catch (err) {
     checks.push({
       id: 'profiles',
-      label: 'Profil agent ada',
+      label: 'Có hồ sơ tác tử',
       status: 'fail',
       detail: (err as Error).message.slice(0, 300),
-      fix: 'bikin dari form Agent, atau: hermes profile create <nama> --no-alias',
+      fix: 'Tạo từ biểu mẫu Tác tử hoặc chạy: hermes profile create <nama> --no-alias',
     })
   }
 
@@ -396,17 +368,17 @@ export async function runDoctor(opts: { host: string | null; origin: string | nu
   if (!profiles) {
     checks.push({
       id: 'models',
-      label: 'Profil punya model',
+      label: 'Hồ sơ có mô hình',
       status: 'unknown',
-      detail: 'tidak bisa dipastikan — daftar profil sendiri gagal dibaca',
+      detail: 'Không thể xác định — không đọc được danh sách hồ sơ',
       fix: '',
     })
   } else if (!profiles.length) {
     checks.push({
       id: 'models',
-      label: 'Profil punya model',
+      label: 'Hồ sơ có mô hình',
       status: 'unknown',
-      detail: 'tidak bisa dipastikan — tidak ada profil untuk diperiksa',
+      detail: 'Không thể xác định — không có hồ sơ để kiểm tra',
       fix: '',
     })
   } else {
@@ -417,18 +389,18 @@ export async function runDoctor(opts: { host: string | null; origin: string | nu
     if (!missing.length) {
       checks.push({
         id: 'models',
-        label: 'Profil punya model',
+        label: 'Hồ sơ có mô hình',
         status: 'pass',
-        detail: `semua ${profiles.length} profil punya model default`,
+        detail: `Toàn bộ ${profiles.length} hồ sơ có mô hình mặc định`,
         fix: '',
       })
     } else {
       checks.push({
         id: 'models',
-        label: 'Profil punya model',
+        label: 'Hồ sơ có mô hình',
         status: 'fail',
-        detail: `tanpa model: ${missing.join(', ')} — chat ke mereka akan gagal`,
-        fix: `isi model tiap profil (pemilih model di form Agent), atau: hermes -p <nama> config set model.default <model>`,
+        detail: `Chưa có mô hình: ${missing.join(', ')} — trò chuyện với các tác tử này sẽ thất bại`,
+        fix: `Chọn mô hình cho từng hồ sơ (bộ chọn trong biểu mẫu Tác tử) hoặc chạy: hermes -p <nama> config set model.default <model>`,
       })
     }
     // Provider menggantung: `model.provider: custom:<nama>` tanpa definisi
@@ -452,7 +424,7 @@ export async function runDoctor(opts: { host: string | null; origin: string | nu
         if (!row) {
           unreadable.push(m.p)
         } else if (verdict === 'dangling') {
-          dangling.push(`${m.p} (provider "${(m.provider || '').trim()}" tanpa definisi)`)
+          dangling.push(`${m.p} (Nhà cung cấp "${(m.provider || '').trim()}" chưa có định nghĩa)`)
         } else if (verdict === 'unknown') {
           unreadable.push(m.p)
         }
@@ -460,25 +432,25 @@ export async function runDoctor(opts: { host: string | null; origin: string | nu
       if (dangling.length) {
         checks.push({
           id: 'model-providers',
-          label: 'Provider model bisa diresolusi',
+          label: 'Xác định được nhà cung cấp mô hình',
           status: 'fail',
-          detail: `provider menggantung: ${dangling.join(', ')} — chat ke mereka mati ("Unknown provider")`,
-          fix: `salin definisi dari config global ke tiap profil, contoh:\nhermes -p <nama> config set custom_providers "$(hermes config get custom_providers --json)"\natau pilih ulang model dari pemilih model di form Agent (sekarang menyalin definisinya otomatis)`,
+          detail: `Nhà cung cấp chưa có định nghĩa: ${dangling.join(', ')} — không thể trò chuyện với các tác tử này ("Unknown provider")`,
+          fix: `TỰ TẠO định nghĩa nhà cung cấp tương ứng trong phạm vi hồ sơ bằng thông tin xác thực thật của bạn (không sao chép đầu ra config-get đã che api_key). Tính năng sao chép tự động đã tắt trong bản vá này.`,
         })
       } else if (unreadable.length) {
         checks.push({
           id: 'model-providers',
-          label: 'Provider model bisa diresolusi',
+          label: 'Xác định được nhà cung cấp mô hình',
           status: 'unknown',
-          detail: `tidak bisa dipastikan — definisi provider tak terbaca untuk: ${unreadable.join(', ')}`,
+          detail: `Không thể xác định — không đọc được định nghĩa nhà cung cấp của: ${unreadable.join(', ')}`,
           fix: '',
         })
       } else {
         checks.push({
           id: 'model-providers',
-          label: 'Provider model bisa diresolusi',
+          label: 'Xác định được nhà cung cấp mô hình',
           status: 'pass',
-          detail: `semua provider custom (${[...new Set(customNames)].join(', ')}) ada definisinya di scope tiap profil`,
+          detail: `Toàn bộ nhà cung cấp tùy chỉnh (${[...new Set(customNames)].join(', ')}) đều có định nghĩa trong phạm vi từng hồ sơ`,
           fix: '',
         })
       }
@@ -489,18 +461,18 @@ export async function runDoctor(opts: { host: string | null; origin: string | nu
   if (isConfigured()) {
     checks.push({
       id: 'simulasi',
-      label: 'Provider LLM rapat simulasi',
+      label: 'Nhà cung cấp LLM cho cuộc họp mô phỏng',
       status: 'pass',
-      detail: 'AI_BASE_URL + AI_API_KEY terisi — rapat mode simulasi bisa jalan',
+      detail: 'Đã có AI_BASE_URL + AI_API_KEY — có thể chạy cuộc họp mô phỏng',
       fix: '',
     })
   } else {
     checks.push({
       id: 'simulasi',
-      label: 'Provider LLM rapat simulasi',
+      label: 'Nhà cung cấp LLM cho cuộc họp mô phỏng',
       status: 'fail',
-      detail: 'AI_BASE_URL/AI_API_KEY kosong — rapat simulasi akan menjawab "not configured"',
-      fix: 'isi AI_BASE_URL + AI_API_KEY di .env.local (lihat .env.example). Rapat mode a2a TIDAK butuh ini — agent nyata yang bicara.',
+      detail: 'AI_BASE_URL/AI_API_KEY trống — cuộc họp mô phỏng sẽ báo chưa được cấu hình',
+      fix: 'Điền AI_BASE_URL + AI_API_KEY vào .env.local (xem .env.example). Cuộc họp a2a KHÔNG cần các giá trị này — tác tử thật sẽ phát biểu.',
     })
   }
 
@@ -517,35 +489,35 @@ export async function runDoctor(opts: { host: string | null; origin: string | nu
     if (!parsed.found || !parsed.enabled) {
       checks.push({
         id: 'a2a-platform',
-        label: 'Platform A2A nyala',
+        label: 'Nền tảng A2A đang bật',
         status: 'fail',
-        detail: parsed.found ? 'platforms.a2a ada tapi enabled bukan true' : 'platforms.a2a belum ada di config Hermes',
-        fix: 'hermes config set platforms.a2a.enabled true --force\nhermes config set platforms.a2a.port 9900 --force\nlalu restart gateway',
+        detail: parsed.found ? 'Đã có platforms.a2a nhưng enabled không phải true' : 'Chưa có platforms.a2a trong cấu hình Hermes',
+        fix: 'hermes config set platforms.a2a.enabled true --force\nhermes config set platforms.a2a.port 9900 --force\nrồi khởi động lại gateway',
       })
     } else if (parsed.port === null) {
       checks.push({
         id: 'a2a-platform',
-        label: 'Platform A2A nyala',
+        label: 'Nền tảng A2A đang bật',
         status: 'fail',
-        detail: 'enabled true tapi port tidak terbaca',
-        fix: 'hermes config set platforms.a2a.port 9900 --force\nlalu restart gateway',
+        detail: 'enabled là true nhưng không đọc được port',
+        fix: 'hermes config set platforms.a2a.port 9900 --force\nrồi khởi động lại gateway',
       })
     } else {
       a2aEnabled = true
       checks.push({
         id: 'a2a-platform',
-        label: 'Platform A2A nyala',
+        label: 'Nền tảng A2A đang bật',
         status: 'pass',
-        detail: `enabled, port ${parsed.port} (tanpa token, server mengikat loopback saja)`,
+        detail: `Đã bật, cổng ${parsed.port} (không có token, máy chủ chỉ lắng nghe trên loopback)`,
         fix: '',
       })
     }
   } catch (err) {
     checks.push({
       id: 'a2a-platform',
-      label: 'Platform A2A nyala',
+      label: 'Nền tảng A2A đang bật',
       status: 'unknown',
-      detail: `tidak bisa dipastikan — config tak terbaca: ${(err as Error).message.slice(0, 200)}`,
+      detail: `Không thể xác định — không đọc được cấu hình: ${(err as Error).message.slice(0, 200)}`,
       fix: '',
     })
   }
@@ -554,9 +526,9 @@ export async function runDoctor(opts: { host: string | null; origin: string | nu
   if (!profiles) {
     checks.push({
       id: 'served',
-      label: 'Agen yang di-serve',
+      label: 'Tác tử được đăng ký phục vụ',
       status: 'unknown',
-      detail: 'tidak bisa dipastikan — daftar profil gagal dibaca, basi tidak bisa dinilai',
+      detail: 'Không thể xác định — không đọc được danh sách hồ sơ, chưa thể đánh giá mục lỗi thời',
       fix: '',
     })
   } else {
@@ -567,39 +539,39 @@ export async function runDoctor(opts: { host: string | null; origin: string | nu
       const stale = rows.filter((r) => r.stale)
       const wrongLocal = served.filter((s) => s.local !== false)
       const detail: string[] = []
-      if (fresh.length) detail.push(`siap: ${fresh.map((r) => r.profile).join(', ')}`)
-      if (stale.length) detail.push(`BASI (profil hilang): ${stale.map((r) => r.profile).join(', ')}`)
-      if (wrongLocal.length) detail.push(`local:true (identitas salah): ${wrongLocal.map((s) => s.profile).join(', ')}`)
-      if (!served.length) detail.push('belum ada agent yang di-serve')
+      if (fresh.length) detail.push(`Sẵn sàng: ${fresh.map((r) => r.profile).join(', ')}`)
+      if (stale.length) detail.push(`LỖI THỜI (hồ sơ đã mất): ${stale.map((r) => r.profile).join(', ')}`)
+      if (wrongLocal.length) detail.push(`local:true (sai danh tính): ${wrongLocal.map((s) => s.profile).join(', ')}`)
+      if (!served.length) detail.push('Chưa có tác tử nào được đăng ký phục vụ')
       if (stale.length || wrongLocal.length || !fresh.length) {
         const fixes: string[] = []
-        if (!fresh.length) fixes.push('daftarkan agent lewat toggle A2A di form Agent (aplikasi menulis local:false)')
-        if (stale.length) fixes.push(`cabut entri basi: ${stale.map((r) => r.profile).join(', ')} (toggle mati di form Agent)`)
-        if (wrongLocal.length) fixes.push('local HARUS false — true berarti yang menjawab sesi gateway umum, identitas agent salah')
-        if (a2aEnabled && fresh.length) fixes.push('lalu restart gateway (daftar served dibaca sekali saat boot)')
+        if (!fresh.length) fixes.push('Đăng ký tác tử qua công tắc A2A trong biểu mẫu Tác tử (ứng dụng ghi local:false)')
+        if (stale.length) fixes.push(`Gỡ mục lỗi thời: ${stale.map((r) => r.profile).join(', ')} (tắt công tắc trong biểu mẫu Tác tử)`)
+        if (wrongLocal.length) fixes.push('local PHẢI là false — true nghĩa là phiên gateway chung trả lời, sai danh tính tác tử')
+        if (a2aEnabled && fresh.length) fixes.push('rồi khởi động lại gateway (danh sách đăng ký phục vụ chỉ được đọc một lần lúc khởi động)')
         checks.push({
           id: 'served',
-          label: 'Agen yang di-serve',
+          label: 'Tác tử được đăng ký phục vụ',
           status: 'fail',
           detail: detail.join(' · '),
           fix: fixes.join('\n'),
         })
       } else {
-        const platformNote = a2aEnabled ? '' : ' — platform A2A sendiri belum terverifikasi nyala (lihat periksa di atas)'
+        const platformNote = a2aEnabled ? '' : ' — chưa xác minh nền tảng A2A đang bật (xem kiểm tra phía trên)'
         checks.push({
           id: 'served',
-          label: 'Agen yang di-serve',
+          label: 'Tác tử được đăng ký phục vụ',
           status: 'pass',
-          detail: `${fresh.length} siap: ${fresh.map((r) => r.profile).join(', ')}${platformNote}`,
+          detail: `${fresh.length} sẵn sàng: ${fresh.map((r) => r.profile).join(', ')}${platformNote}`,
           fix: '',
         })
       }
     } catch (err) {
       checks.push({
         id: 'served',
-        label: 'Agen yang di-serve',
+        label: 'Tác tử được đăng ký phục vụ',
         status: 'unknown',
-        detail: `tidak bisa dipastikan — daftar served tak terbaca: ${(err as Error).message.slice(0, 200)}`,
+        detail: `Không thể xác định — không đọc được danh sách đăng ký phục vụ: ${(err as Error).message.slice(0, 200)}`,
         fix: '',
       })
     }
@@ -615,41 +587,41 @@ export async function runDoctor(opts: { host: string | null; origin: string | nu
     if (need === null) {
       checks.push({
         id: 'restart',
-        label: 'Butuh restart gateway?',
+        label: 'Cần khởi động lại gateway?',
         status: 'unknown',
-        detail: 'tidak bisa dipastikan — waktu start gateway tak terbaca (bukan service user systemd?)',
-        fix: 'pastikan gateway jalan sebagai hermes-gateway user service, atau restart manual tiap habis mengubah served',
+        detail: 'Không thể xác định — không đọc được thời điểm khởi động gateway (không phải dịch vụ người dùng systemd?)',
+        fix: 'Đảm bảo gateway chạy dưới dạng dịch vụ người dùng hermes-gateway hoặc tự khởi động lại sau mỗi lần đổi danh sách đăng ký phục vụ',
       })
     } else if (need) {
       checks.push({
         id: 'restart',
-        label: 'Butuh restart gateway?',
+        label: 'Cần khởi động lại gateway?',
         status: 'fail',
-        detail: 'config.yaml lebih baru dari start gateway — entri served tersimpan tapi BELUM aktif',
-        fix: 'Tersimpan, belum aktif — restart gateway:\nhermes gateway restart',
+        detail: 'config.yaml mới hơn thời điểm khởi động gateway — các mục đã lưu nhưng CHƯA có hiệu lực',
+        fix: 'Đã lưu, chưa có hiệu lực — khởi động lại gateway:\nhermes gateway restart',
       })
     } else {
       checks.push({
         id: 'restart',
-        label: 'Butuh restart gateway?',
+        label: 'Cần khởi động lại gateway?',
         status: 'pass',
-        detail: 'gateway start lebih baru dari config — served yang tersimpan sudah aktif',
+        detail: 'gateway khởi động sau lần cập nhật cấu hình — các mục đăng ký đã lưu đang có hiệu lực',
         fix: '',
       })
     }
   } catch (err) {
     checks.push({
       id: 'restart',
-      label: 'Butuh restart gateway?',
+      label: 'Cần khởi động lại gateway?',
       status: 'unknown',
-      detail: `tidak bisa dipastikan: ${(err as Error).message.slice(0, 200)}`,
+      detail: `Không thể xác định: ${(err as Error).message.slice(0, 200)}`,
       fix: '',
     })
   }
 
   // 9. Origin boleh menulis.
   const v = originVerdict(opts.host, opts.origin, process.env.ALLOWED_ORIGINS || '')
-  checks.push({ id: 'origin', label: 'Origin boleh menulis', status: v.status, detail: v.detail, fix: v.fix })
+  checks.push({ id: 'origin', label: 'Origin được phép ghi', status: v.status, detail: v.detail, fix: v.fix })
 
   // 10. SELFREPAIR-1 + A2A-CALL-1: kemampuan MEMANGGIL per profil yang di-serve.
   // "Di-serve" = bisa DIPANGGIL; toolset a2a = bisa MEMANGGIL. Dipanggil ya +
@@ -658,9 +630,9 @@ export async function runDoctor(opts: { host: string | null; origin: string | nu
   if (!profiles) {
     checks.push({
       id: 'caller',
-      label: 'Agent bisa memanggil (toolset a2a)',
+      label: 'Tác tử có thể gọi tác tử khác (toolset a2a)',
       status: 'unknown',
-      detail: 'tidak bisa dipastikan — daftar profil gagal dibaca',
+      detail: 'Không thể xác định — không đọc được danh sách hồ sơ',
       fix: '',
     })
   } else {
@@ -670,9 +642,9 @@ export async function runDoctor(opts: { host: string | null; origin: string | nu
       if (served === null) {
         checks.push({
           id: 'caller',
-          label: 'Agent bisa memanggil (toolset a2a)',
+          label: 'Tác tử có thể gọi tác tử khác (toolset a2a)',
           status: 'unknown',
-          detail: 'tidak bisa dipastikan — daftar served tak terbaca',
+          detail: 'Không thể xác định — không đọc được danh sách đăng ký phục vụ',
           fix: '',
         })
       } else {
@@ -689,33 +661,33 @@ export async function runDoctor(opts: { host: string | null; origin: string | nu
         if (mute.length) {
           checks.push({
             id: 'caller',
-            label: 'Agent bisa memanggil (toolset a2a)',
+            label: 'Tác tử có thể gọi tác tử khác (toolset a2a)',
             status: 'fail',
-            detail: 'dipanggil ya, memanggil tidak: ' + mute.join(', ') + ' — mereka bisa dihubungi tapi tidak bisa menghubungi siapa pun',
-            fix: 'tambah toolset a2a tiap profil itu (digabung, bukan ditimpa) — jalankan POST /api/hermes/selfrepair (lihat docs/API-SPEC.md § selfrepair; menyapu otomatis, idempoten)',
+            detail: 'Có thể nhận cuộc gọi nhưng không gọi được: ' + mute.join(', ') + ' — có thể liên hệ các tác tử này nhưng chúng không thể gọi tác tử khác',
+            fix: 'Thêm toolset a2a cho từng hồ sơ đó (gộp, không ghi đè) — gọi POST /api/hermes/selfrepair (xem docs/API-SPEC.md § selfrepair; tự quét, chạy lặp không đổi kết quả)',
           })
         } else if (unreadable.length) {
           checks.push({
             id: 'caller',
-            label: 'Agent bisa memanggil (toolset a2a)',
+            label: 'Tác tử có thể gọi tác tử khác (toolset a2a)',
             status: 'unknown',
-            detail: `tidak bisa dipastikan — toolset tak terbaca untuk: ${unreadable.join(', ')}`,
+            detail: `Không thể xác định — không đọc được toolset của: ${unreadable.join(', ')}`,
             fix: '',
           })
         } else if (!rows.length) {
           checks.push({
             id: 'caller',
-            label: 'Agent bisa memanggil (toolset a2a)',
+            label: 'Tác tử có thể gọi tác tử khác (toolset a2a)',
             status: 'unknown',
-            detail: 'tidak bisa dipastikan — belum ada agent yang di-serve untuk dinilai',
+            detail: 'Không thể xác định — chưa có tác tử đăng ký phục vụ để đánh giá',
             fix: '',
           })
         } else {
           checks.push({
             id: 'caller',
-            label: 'Agent bisa memanggil (toolset a2a)',
+            label: 'Tác tử có thể gọi tác tử khác (toolset a2a)',
             status: 'pass',
-            detail: `semua ${rows.length} agent yang di-serve punya toolset a2a (dipanggil + memanggil)`,
+            detail: `Toàn bộ ${rows.length} tác tử đăng ký phục vụ có toolset a2a (nhận và thực hiện cuộc gọi)`,
             fix: '',
           })
         }
@@ -723,9 +695,9 @@ export async function runDoctor(opts: { host: string | null; origin: string | nu
     } catch (err) {
       checks.push({
         id: 'caller',
-        label: 'Agent bisa memanggil (toolset a2a)',
+        label: 'Tác tử có thể gọi tác tử khác (toolset a2a)',
         status: 'unknown',
-        detail: `tidak bisa dipastikan: ${(err as Error).message.slice(0, 200)}`,
+        detail: `Không thể xác định: ${(err as Error).message.slice(0, 200)}`,
         fix: '',
       })
     }
@@ -741,9 +713,9 @@ export async function runDoctor(opts: { host: string | null; origin: string | nu
       if (served === null) {
         checks.push({
           id: 'peers',
-          label: 'Nama agent bisa diresolusi (peer a2a_agents)',
+          label: 'Phân giải được tên tác tử (peer a2a_agents)',
           status: 'unknown',
-          detail: 'tidak bisa dipastikan — daftar served tak terbaca',
+          detail: 'Không thể xác định — không đọc được danh sách đăng ký phục vụ',
           fix: '',
         })
       } else {
@@ -751,9 +723,9 @@ export async function runDoctor(opts: { host: string | null; origin: string | nu
         if (peers === null) {
           checks.push({
             id: 'peers',
-            label: 'Nama agent bisa diresolusi (peer a2a_agents)',
+            label: 'Phân giải được tên tác tử (peer a2a_agents)',
             status: 'unknown',
-            detail: 'tidak bisa dipastikan — daftar peer a2a_agents gagal dibaca (bukan sekadar kosong)',
+            detail: 'Không thể xác định — không đọc được danh sách peer a2a_agents (không phải danh sách trống)',
             fix: '',
           })
         } else {
@@ -782,41 +754,41 @@ export async function runDoctor(opts: { host: string | null; origin: string | nu
           if (missing.length) {
             checks.push({
               id: 'peers',
-              label: 'Nama agent bisa diresolusi (peer a2a_agents)',
+              label: 'Phân giải được tên tác tử (peer a2a_agents)',
               status: 'fail',
-              detail: `peer hilang: ${missing.map((s) => `${peerKeyFor(s.profile)} → ${peerEntryUrl(s.profile)}`).join(', ')} — a2a_call("nama") menjawab unknown agent`,
-              fix: 'jalankan POST /api/hermes/selfrepair — mendaftarkan peer yang hilang, idempoten (lihat docs/API-SPEC.md § selfrepair)',
+              detail: `Thiếu peer: ${missing.map((s) => `${peerKeyFor(s.profile)} → ${peerEntryUrl(s.profile)}`).join(', ')} — a2a_call("nama") trả về unknown agent`,
+              fix: 'Gọi POST /api/hermes/selfrepair — đăng ký peer còn thiếu, chạy lặp không đổi kết quả (xem docs/API-SPEC.md § selfrepair)',
             })
           } else if (profUnreadable.length) {
             checks.push({
               id: 'peers',
-              label: 'Nama agent bisa diresolusi (peer a2a_agents)',
+              label: 'Phân giải được tên tác tử (peer a2a_agents)',
               status: 'unknown',
-              detail: `tidak bisa dipastikan — peer profil gagal dibaca untuk: ${profUnreadable.join(', ')}`,
+              detail: `Không thể xác định — không đọc được peer trong hồ sơ: ${profUnreadable.join(', ')}`,
               fix: '',
             })
           } else if (profMissing.length) {
             checks.push({
               id: 'peers',
-              label: 'Nama agent bisa diresolusi (peer a2a_agents)',
+              label: 'Phân giải được tên tác tử (peer a2a_agents)',
               status: 'fail',
-              detail: `peer profil hilang: ${profMissing.join(', ')} — tool a2a_call tak muncul di sesi profil itu (gate scope-profil)`,
-              fix: 'jalankan POST /api/hermes/selfrepair — menulis peer profil yang hilang, idempoten (lihat docs/API-SPEC.md § selfrepair)',
+              detail: `Thiếu peer trong hồ sơ: ${profMissing.join(', ')} — công cụ a2a_call không xuất hiện trong phiên của hồ sơ đó (giới hạn phạm vi hồ sơ)`,
+              fix: 'Gọi POST /api/hermes/selfrepair — ghi peer còn thiếu vào hồ sơ, chạy lặp không đổi kết quả (xem docs/API-SPEC.md § selfrepair)',
             })
           } else if (!served.length) {
             checks.push({
               id: 'peers',
-              label: 'Nama agent bisa diresolusi (peer a2a_agents)',
+              label: 'Phân giải được tên tác tử (peer a2a_agents)',
               status: 'unknown',
-              detail: 'tidak bisa dipastikan — belum ada agent yang di-serve untuk dinilai',
+              detail: 'Không thể xác định — chưa có tác tử đăng ký phục vụ để đánh giá',
               fix: '',
             })
           } else {
             checks.push({
               id: 'peers',
-              label: 'Nama agent bisa diresolusi (peer a2a_agents)',
+              label: 'Phân giải được tên tác tử (peer a2a_agents)',
               status: 'pass',
-              detail: `semua ${served.length} agent yang di-serve punya peer (${served.map((s) => peerKeyFor(s.profile)).join(', ')})`,
+              detail: `Toàn bộ ${served.length} tác tử đăng ký phục vụ có peer (${served.map((s) => peerKeyFor(s.profile)).join(', ')})`,
               fix: '',
             })
           }
@@ -825,69 +797,38 @@ export async function runDoctor(opts: { host: string | null; origin: string | nu
     } catch (err) {
       checks.push({
         id: 'peers',
-        label: 'Nama agent bisa diresolusi (peer a2a_agents)',
+        label: 'Phân giải được tên tác tử (peer a2a_agents)',
         status: 'unknown',
-        detail: `tidak bisa dipastikan: ${(err as Error).message.slice(0, 200)}`,
+        detail: `Không thể xác định: ${(err as Error).message.slice(0, 200)}`,
         fix: '',
       })
     }
   }
-  // 11. SELFREPAIR-1: A2A menolak path yang tidak dikenal (bug fallthrough).
-  // Tambalan ada di sisi Hermes dan bisa hilang saat update — doctor memberi
-  // tahu supaya pengguna tidak menuduh proyek ini.
+  // 11. SELFREPAIR-1 / HVO-03: passive only.
+  // The old doctor POSTed a message-send "ping" to an unknown path to detect a
+  // gateway fall-through bug. That can create a real agent turn/token spend and
+  // probe the wrong local port. Default diagnostics must have NO model side
+  // effects, so this check is deliberately UNKNOWN: without an active probe we
+  // cannot prove the gateway rejects unknown paths. No probe feature is offered
+  // in this patch.
   if (!a2aEnabled) {
     checks.push({
       id: 'fallthrough',
-      label: 'A2A menolak path tak dikenal',
+      label: 'A2A từ chối đường dẫn không xác định',
       status: 'unknown',
-      detail: 'tidak bisa dipastikan — platform A2A sendiri belum terverifikasi nyala',
+      detail: 'Không thể xác định — chưa xác minh nền tảng A2A đang bật; thăm dò chủ động đã tắt',
       fix: '',
     })
   } else {
-    try {
-      const { readFile } = await import('node:fs/promises')
-      const { hermesHome } = await import('./kanban')
-      const raw = await readFile(`${hermesHome()}/config.yaml`, 'utf8')
-      const m = /port:\s*(\d+)/.exec(raw)
-      const port = m ? Number(m[1]) : 9900
-      const ctrl = new AbortController()
-      const timer = setTimeout(() => ctrl.abort(), 8000)
-      let httpOk = false
-      let body = ''
-      try {
-        const res = await fetch(`http://127.0.0.1:${port}/zz-tidak-ada-${Date.now()}`, {
-          method: 'POST',
-          signal: ctrl.signal,
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            jsonrpc: '2.0',
-            id: 'doctor-fallthrough',
-            method: 'message/send',
-            params: { message: { role: 'user', parts: [{ text: 'ping' }] } },
-          }),
-        })
-        httpOk = res.ok
-        body = await res.text().catch(() => '')
-      } finally {
-        clearTimeout(timer)
-      }
-      const ft = fallthroughVerdict(httpOk, body)
-      checks.push({
-        id: 'fallthrough',
-        label: 'A2A menolak path tak dikenal',
-        status: ft.status,
-        detail: ft.detail,
-        fix: ft.status === 'fail' ? 'pasang tambalan sisi-Hermes docs/patches/hermes-a2a-unknown-path-404.README.md (git apply --check, git apply, curl verifikasi, hermes gateway restart); bila Hermes versi baru sudah menolak path asing bawaan, tambalan tidak perlu' : '',
-      })
-    } catch (err) {
-      checks.push({
-        id: 'fallthrough',
-        label: 'A2A menolak path tak dikenal',
-        status: 'unknown',
-        detail: `tidak bisa dipastikan — probe gagal: ${(err as Error).message.slice(0, 200)}`,
-        fix: '',
-      })
-    }
+    checks.push({
+      id: 'fallthrough',
+      label: 'A2A từ chối đường dẫn không xác định',
+      status: 'unknown',
+      detail:
+        'Không thể xác định nếu không thăm dò chủ động — GET doctor KHÔNG gửi tin nhắn/POST đến gateway, ' +
+        'nên không tác động đến mô hình/token. Hãy tự xác minh bằng curl nếu cần.',
+      fix: '',
+    })
   }
 
   void taskCount

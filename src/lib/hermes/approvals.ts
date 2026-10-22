@@ -24,7 +24,9 @@ import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import type { Task } from '@/types/hermes'
 import { readBoard, type BoardReadout } from './board'
-import { activeTaskByAssignee, getTaskDetail } from './kanban'
+import { activeTaskByAssignee, getTaskDetail, isOtherBoardRow } from './kanban'
+import { fleetRootEnv } from './root'
+import { errorTail } from './redact'
 
 const run = promisify(execFile)
 const HERMES_BIN = process.env.HERMES_BIN || 'hermes'
@@ -56,7 +58,7 @@ export function isApprovalsStale(ageSeconds: number): boolean {
 
 /** Sama dengan `cleanEnv` di kanban.ts: variabel sesi chat tidak boleh bocor ke proses CLI. */
 function cliEnv(): NodeJS.ProcessEnv {
-  const env = { ...process.env }
+  const env = fleetRootEnv(process.env)
   for (const k of Object.keys(env)) if (k.startsWith('HERMES_SESSION_')) delete env[k]
   return env
 }
@@ -64,9 +66,9 @@ function cliEnv(): NodeJS.ProcessEnv {
 /** Pesan gagal yang bisa dibaca operator, termasuk membedakan TIMEOUT dari gagal biasa. */
 function whyFailed(err: unknown, slow: string): string {
   const e = err as NodeJS.ErrnoException & { killed?: boolean; signal?: string; stderr?: string }
-  if (e.code === 'ENOENT') return `hermes CLI tidak ditemukan ("${HERMES_BIN}")`
+  if (e.code === 'ENOENT') return `Không tìm thấy Hermes CLI ("${HERMES_BIN}")`
   if (e.killed || e.signal === 'SIGTERM') return slow
-  return (e.stderr || e.message || 'gagal tanpa pesan').trim().split('\n').slice(-1)[0]
+  return errorTail(e, 300)
 }
 
 const ageOf = (readAt: string) => Math.max(0, Math.round((Date.now() - Date.parse(readAt)) / 1000))
@@ -97,13 +99,13 @@ export async function readApprovalPolicy(): Promise<ApprovalPolicy> {
       maxBuffer: 1024 * 1024,
     }))
   } catch (err) {
-    return { ...empty, failure: whyFailed(err, `config get lambat (>${POLICY_TIMEOUT_MS / 1000} dtk)`) }
+    return { ...empty, failure: whyFailed(err, `config get phản hồi chậm (>${POLICY_TIMEOUT_MS / 1000} giây)`) }
   }
   const start = out.search(/[{]/)
-  if (start < 0) return { ...empty, failure: 'kunci "approvals" tidak ada di config' }
+  if (start < 0) return { ...empty, failure: 'Không có khóa "approvals" trong cấu hình' }
   try {
     const raw = JSON.parse(out.slice(start)) as { mode?: unknown; timeout?: unknown; deny?: unknown }
-    if (typeof raw.mode !== 'string') return { ...empty, failure: 'config approvals tidak punya "mode"' }
+    if (typeof raw.mode !== 'string') return { ...empty, failure: 'Cấu hình approvals không có "mode"' }
     const timeout = Number(raw.timeout)
     return {
       mode: raw.mode,
@@ -113,7 +115,7 @@ export async function readApprovalPolicy(): Promise<ApprovalPolicy> {
       ageSeconds: 0,
     }
   } catch {
-    return { ...empty, failure: 'keluaran config approvals bukan JSON' }
+    return { ...empty, failure: 'Đầu ra config approvals không phải JSON' }
   }
 }
 
@@ -157,7 +159,7 @@ async function scanPatterns(): Promise<Omit<ApprovalPatterns, 'ageSeconds'>> {
       { env: cliEnv(), timeout: SUGGEST_TIMEOUT_MS, maxBuffer: 4 * 1024 * 1024 },
     ))
   } catch (err) {
-    return { ...empty, failure: whyFailed(err, `suggest lambat (>${SUGGEST_TIMEOUT_MS / 1000} dtk)`) }
+    return { ...empty, failure: whyFailed(err, `suggest phản hồi chậm (>${SUGGEST_TIMEOUT_MS / 1000} giây)`) }
   }
   const start = out.search(/[{]/)
   // Keluar tanpa apa pun = tidak ada pola yang memenuhi syarat. Itu jawaban, bukan kegagalan.
@@ -176,7 +178,7 @@ async function scanPatterns(): Promise<Omit<ApprovalPatterns, 'ageSeconds'>> {
     })
     return { ...empty, count: proposals.length, proposals }
   } catch {
-    return { ...empty, failure: 'keluaran suggest bukan JSON' }
+    return { ...empty, failure: 'Đầu ra suggest không phải JSON' }
   }
 }
 
@@ -235,9 +237,27 @@ export function readApprovalQueue(tasks: Task[], detail: Map<string, { events: E
  * assignee — tiap `kanban show` satu proses Python, dan task lain tidak bisa membuat agent mana
  * pun berhenti. Dipakai route `agents` dan `tasks` (yang terakhir itu yang memberi makan avatar).
  */
+/**
+ * Detail for an avatar's card on ANOTHER board: held 10 s (the same window as the other
+ * boards' task lists), so the all-board avatar status costs one `show` per such agent per
+ * 10 s instead of one per 4 s poll. The board on screen keeps the normal 3 s read cache.
+ */
+const OTHER_DETAIL_TTL_MS = 10_000
+const otherDetail = new Map<string, { at: number; d: Awaited<ReturnType<typeof getTaskDetail>> }>()
+async function otherBoardDetail(t: Task) {
+  const key = `${t.board ?? ''}:${t.id}`
+  const hit = otherDetail.get(key)
+  if (hit && Date.now() - hit.at < OTHER_DETAIL_TTL_MS) return hit.d
+  const d = await getTaskDetail(t.id, t.board)
+  if (otherDetail.size > 200) otherDetail.clear()
+  otherDetail.set(key, { at: Date.now(), d })
+  return d
+}
+
 export async function blockedAssigneesFor(tasks: Task[]): Promise<Set<string>> {
   const active = [...activeTaskByAssignee(tasks).values()]
-  const details = await Promise.all(active.map((t) => getTaskDetail(t.id)))
+  // `t.board`: with all-board aggregation an active task may live on another board.
+  const details = await Promise.all(active.map((t) => (isOtherBoardRow(t) ? otherBoardDetail(t) : getTaskDetail(t.id, t.board))))
   const detail = new Map(active.map((t, i) => [t.id, { events: details[i]?.events || [] }]))
   return readApprovalQueue(active, detail).blockedAgentIds
 }

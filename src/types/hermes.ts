@@ -41,6 +41,8 @@ export type TaskOrigin = {
 
 /** A Kanban task as rendered on the office floor. */
 export type Task = {
+  /** Board slug the task lives on (set by the server; absent = office default board). */
+  board?: string
   id: string
   title: string
   status: TaskStatus
@@ -99,6 +101,10 @@ export type Agent = {
   deskIndex: number | null
   status: AgentStatus
   currentTaskId?: string | null
+  /** Board of `currentTaskId` — agents aggregate busy tasks across ALL boards. */
+  currentTaskBoard?: string | null
+  /** Title of the current task, so the office can name it even when it is on another board. */
+  currentTaskTitle?: string | null
   /** The profile's default model — what its workers and chats run. */
   model?: string | null
 }

@@ -100,15 +100,15 @@ export function readVerification(
         ...(typeof events[lastReviewIdx].created_at === 'number'
           ? { requestedAt: events[lastReviewIdx].created_at }
           : {}),
-        why: reviewer ? `menunggu review oleh ${reviewer}` : 'menunggu review',
+        why: reviewer ? `Chờ đánh giá bởi ${reviewer}` : 'Chờ đánh giá',
       }
     }
-    return { verdict: 'open', why: 'belum selesai — belum dinilai' }
+    return { verdict: 'open', why: 'Chưa hoàn tất — chưa đánh giá' }
   }
 
   // Task done: tanpa review yang sah, ini klaim worker — bukan terverifikasi.
   if (lastReviewIdx < 0) {
-    return { verdict: 'claim', why: 'selesai tanpa lewat review — klaim worker' }
+    return { verdict: 'claim', why: 'Hoàn tất nhưng chưa qua đánh giá — theo tuyên bố của worker' }
   }
   const rp = events[lastReviewIdx].payload ?? {}
   const reviewer = text(rp.reviewer)
@@ -127,28 +127,28 @@ export function readVerification(
       return {
         verdict: 'claim',
         ...base,
-        why: 'review dikembalikan, selesai tanpa review ulang — klaim worker',
+        why: 'Đánh giá bị trả lại, hoàn tất mà chưa được đánh giá lại — theo tuyên bố của worker',
       }
     }
     if (e.kind === 'completed') completedAfter = e
   }
 
   if (!completedAfter) {
-    return { verdict: 'claim', ...base, why: 'catatan penyelesaian setelah review tak ditemukan — klaim worker' }
+    return { verdict: 'claim', ...base, why: 'Không tìm thấy ghi nhận hoàn tất sau đánh giá — theo tuyên bố của worker' }
   }
   return {
     verdict: 'verified',
     ...base,
     ...(typeof completedAfter.created_at === 'number' ? { verifiedAt: completedAfter.created_at } : {}),
-    why: reviewer ? `diverifikasi oleh ${reviewer}` : 'diverifikasi (verifier tak tercatat)',
+    why: reviewer ? `Được xác minh bởi ${reviewer}` : 'Đã xác minh (không ghi người xác minh)',
   }
 }
 
 /** Label penanda untuk kartu. Netral untuk yang tidak dinilai. */
 export const VERIFICATION_MARK_LABEL: Record<VerificationMark, string> = {
-  verified: 'terverifikasi',
-  claim: 'klaim',
+  verified: 'Đã xác minh',
+  claim: 'Tuyên bố',
   open: '',
-  unchecked: 'verifikasi tak diperiksa',
-  failed: 'verifikasi gagal dibaca',
+  unchecked: 'Chưa kiểm tra xác minh',
+  failed: 'Không thể đọc kết quả xác minh',
 }

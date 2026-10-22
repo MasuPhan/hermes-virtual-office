@@ -3,6 +3,8 @@ import { listTasks } from '@/lib/hermes/kanban'
 import { getTaskDetail } from '@/lib/hermes/kanban'
 import { readBoard } from '@/lib/hermes/board'
 import { readPause } from '@/lib/hermes/control'
+import { assertApiRequest } from '@/lib/api-policy'
+import { inRequestBoard } from '@/lib/hermes/board-request'
 
 export const dynamic = 'force-dynamic'
 
@@ -19,7 +21,9 @@ export const dynamic = 'force-dynamic'
  * running, review). Tiap `kanban show` adalah satu proses Python baru (~1,4 s), jadi
  * mengambilnya untuk SELURUH papan akan membuat endpoint ini lebih lambat daripada gunanya.
  */
-export async function GET() {
+async function handleGET(req: Request) {
+  const denied = assertApiRequest(req, 'read')
+  if (denied) return denied
   try {
     const tasks = await listTasks({ includeArchived: false })
     const worthReading = tasks.filter((t) => t.status === 'blocked' || t.status === 'running' || t.status === 'review')
@@ -49,4 +53,9 @@ export async function GET() {
       { status: 503 },
     )
   }
+}
+
+/* Board scope: `?board=<slug>` → every CLI call in the handler gets `--board <slug>`. */
+export async function GET(req: Request) {
+  return inRequestBoard(req, () => handleGET(req))
 }

@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react'
 import dynamic from 'next/dynamic'
 import Kanban2D from './Kanban2D'
+import { UI_ROLE_LABEL, uiState } from './UiLabels'
 import SpriteOffice from './SpriteOffice'
 import PeekPanel from './PeekPanel'
 import TaskPanel from './TaskPanel'
@@ -17,6 +18,7 @@ import KanbanModal from './KanbanModal'
 import DummySpawnDialog from './DummySpawnDialog'
 import OfficeNameDialog from './OfficeNameDialog'
 import { startPolling, useOffice } from '@/lib/store'
+import { t as translate } from '@/lib/i18n'
 import type { OfficeScene } from '@/lib/office/scene'
 import type { AgentDivision } from '@/types/hermes'
 
@@ -28,7 +30,7 @@ import type { AgentDivision } from '@/types/hermes'
  */
 const Scene3D = dynamic(() => import('./Scene3D'), {
   ssr: false,
-  loading: () => <div className="absolute inset-0 grid place-items-center vp-muted">memuat ruangan…</div>,
+  loading: () => <div className="absolute inset-0 grid place-items-center vp-muted">đang tải văn phòng…</div>,
 })
 
 export default function OfficeApp() {
@@ -58,7 +60,19 @@ export default function OfficeApp() {
   const [spawnSlot, setSpawnSlot] = useState<{ avatarId: string; division: AgentDivision } | null>(null)
   const loadOffice = useOffice((s) => s.loadOffice)
 
-  useEffect(() => startPolling(), [])
+  const initFromUrl = useOffice((s) => s.initFromUrl)
+  const loadBoards = useOffice((s) => s.loadBoards)
+  // ?view / ?board / ?task first, so the first poll already reads the right board.
+  useEffect(() => {
+    initFromUrl({ view: true })
+    void loadBoards()
+    const stop = startPolling()
+    const b = setInterval(() => void loadBoards(), 30_000)
+    return () => {
+      stop()
+      clearInterval(b)
+    }
+  }, [initFromUrl, loadBoards])
 
   // Tinggi top bar TIDAK tetap: di layar sempit tombolnya pindah ke baris kedua, dan
   // angka status berubah panjang. Diukur langsung lalu diberikan ke CSS, supaya
@@ -84,7 +98,7 @@ export default function OfficeApp() {
     for (const t of tasks) {
       const prev = seen.current.get(t.id)
       if (prev && prev !== t.status && (t.status === 'review' || t.status === 'blocked')) {
-        new Notification(`Kanban · ${t.status}`, { body: t.title })
+        new Notification(`Kanban · ${uiState(t.status)}`, { body: t.title })
       }
       seen.current.set(t.id, t.status)
     }
@@ -115,7 +129,7 @@ export default function OfficeApp() {
   const pct = live.length ? Math.round((done / live.length) * 100) : 0
 
   return (
-    <div ref={rootRef} className="relative h-dvh w-full overflow-hidden bg-[#0f1418]">
+    <div ref={rootRef} className="relative h-dvh w-full overflow-hidden bg-[var(--bg)]">
       <main className="vp-stage">
         {view === '3d' ? (
           <Scene3D
@@ -134,32 +148,33 @@ export default function OfficeApp() {
       {/* ------------------------------------------------------- top bar */}
       <header ref={barRef} className="vp-topbar">
         <div className="vp-topbar-brand flex items-center gap-3">
+          <img className="vp-logo-img" src="/oxmode-logo.png" alt="OXMODE" width={126} height={18} />
           <span className="vp-logo">Hermes Office</span>
           <span className={`vp-dot ${backendOnline ? 'ok' : 'bad'}`} />
           <span className="vp-muted vp-topbar-status">
-            {backendOnline ? `${agents.length} agent · ${running} jalan · ${pct}% rilis` : 'backend offline'}
+            {backendOnline ? `${agents.length} tác tử · ${running} đang chạy · ${pct}% hoàn tất` : 'máy chủ ngoại tuyến'}
           </span>
         </div>
 
-        <nav className="vp-topbar-nav flex items-center gap-2" aria-label="Panel">
-          <button className="vp-btn vp-btn-ghost" onClick={() => setNewTaskOpen(true)}>+ Tugas</button>
+        <nav className="vp-topbar-nav flex items-center gap-2" aria-label="Bảng điều khiển">
+          <button className="vp-btn vp-btn-ghost" onClick={() => setNewTaskOpen(true)}>+ Công việc</button>
           <button className="vp-btn vp-btn-ghost" onClick={() => setMeetOpen(true)}>
-            Ruang rapat{meeting && meeting.state === 'running' ? ' ●' : ''}
+            Phòng họp{meeting && meeting.state === 'running' ? ' ●' : ''}
           </button>
           <button className="vp-btn vp-btn-ghost" onClick={() => setAgentOpen(true)}>
-            Agent ({agents.length})
+            Tác tử ({agents.length})
           </button>
           <button className="vp-btn vp-btn-ghost" onClick={() => setCronOpen(true)}>
-            Cron
+            Lịch định kỳ
           </button>
           <button className="vp-btn vp-btn-ghost" onClick={() => setPanelOpen(true)}>
-            Papan
+            Bảng công việc
           </button>
           <button className="vp-btn vp-btn-ghost" onClick={() => setSystemOpen(true)}>
-            Sistem
+            Hệ thống
           </button>
           <button className="vp-btn vp-btn-ghost" onClick={() => setChatOpen(true)}>
-            Chat
+            Trò chuyện
           </button>
         </nav>
         {/* Saklar tampilan sengaja di luar <nav>: di HP baris tombol bisa digeser ke
@@ -167,7 +182,7 @@ export default function OfficeApp() {
         <div className={`vp-seg vp-topbar-view ${view === 'sprite' ? 'vp-sprite-toggle' : ''}`}>
           <button className={view === '3d' ? 'on' : ''} onClick={() => setView('3d')}>3D</button>
           <button className={view === '2d' ? 'on' : ''} onClick={() => setView('2d')}>Kanban</button>
-          <button className={view === 'sprite' ? 'on' : ''} onClick={() => setView('sprite')}>Sprite</button>
+          <button className={view === 'sprite' ? 'on' : ''} onClick={() => setView('sprite')}>Điểm ảnh</button>
         </div>
       </header>
 
@@ -180,11 +195,14 @@ export default function OfficeApp() {
           <aside className="vp-card-float">
             <div className="flex items-center justify-between">
               <b>{a.displayName}</b>
-              <button className="vp-x" onClick={() => select(null)} aria-label="Tutup">×</button>
+              <button className="vp-x" onClick={() => select(null)} aria-label="Đóng">×</button>
             </div>
-            <div className="vp-kv"><span>peran</span><b>{a.role}</b></div>
-            <div className="vp-kv"><span>status</span><b>{a.status}</b></div>
-            <div className="vp-kv"><span>tugas</span><b>{t?.title || '—'}</b></div>
+            <div className="vp-kv"><span>vai trò</span><b>{UI_ROLE_LABEL[a.role] ?? a.role}</b></div>
+            <div className="vp-kv"><span>trạng thái</span><b>{uiState(a.status)}</b></div>
+            <div className="vp-kv"><span>công việc</span><b>{t?.title || a.currentTaskTitle || '—'}</b></div>
+            {!t && a.currentTaskBoard && (
+              <div className="vp-kv"><span>{translate('Kanban.boardLabel')}</span><b>{a.currentTaskBoard}</b></div>
+            )}
           </aside>
         )
       })()}

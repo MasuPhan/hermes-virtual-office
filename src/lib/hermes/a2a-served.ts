@@ -16,6 +16,31 @@ import path from 'node:path'
 import { hermesHome } from './kanban'
 import { buildServedAgentEntry, type ServedAgentEntry } from './a2a'
 
+/**
+ * HVO-01 — served-agent CONFIG MUTATION IS DISABLED IN THIS PATCH.
+ *
+ * The previous implementation was a hand-written pseudo-YAML editor. It did not
+ * understand `agents: []`, quoted vs unquoted slugs, malformed anchors, or
+ * concurrent writers, and `hermesWrite` could replace unrelated provider config.
+ * A correct general YAML round-trip is not possible here without a new parser
+ * dependency, which this patch is not allowed to add.
+ *
+ * Mutation is therefore refused with an explicit error BEFORE reading or
+ * writing the gateway config. `listServedAgents` remains read-only so doctor /
+ * roster screens can still report the current state honestly. Manual registration
+ * must be performed by the operator with a reviewed Hermes config editor; this
+ * capability is deferred, not silently emulated.
+ */
+export const A2A_CONFIG_WRITE_DISABLED = true
+export const A2A_CONFIG_WRITE_DISABLED_REASON =
+  'Đăng ký/thu hồi tác tử phục vụ A2A qua văn phòng ĐÃ TẮT trong bản vá bảo mật này: ' +
+  'Bộ ghi cấu hình chưa an toàn với YAML tổng quát. Hãy đăng ký/thu hồi tác tử thủ công trong cấu hình gateway, ' +
+  'rồi khởi động lại gateway. Không có tệp cấu hình nào bị thay đổi.'
+
+function assertA2aConfigWriteEnabled(): void {
+  if (A2A_CONFIG_WRITE_DISABLED) throw new Error(A2A_CONFIG_WRITE_DISABLED_REASON)
+}
+
 /** Override utk selftest: baca/tulis file lain, bukan config gateway asli. */
 let configPathOverride: string | null = null
 export function setServedAgentsConfigPath(p: string | null) {
@@ -129,6 +154,7 @@ export async function upsertServedAgent(opts: {
   description: string
   advertisedToolsets?: string[]
 }): Promise<{ backupPath: string; entry: ServedAgentEntry }> {
+  assertA2aConfigWriteEnabled()
   const cfgPath = configPath()
   const stamp = new Date().toISOString().replace(/[:.]/g, '-')
   const backupPath = `${cfgPath}.bak-a2a3-${stamp}`
@@ -228,6 +254,7 @@ export async function upsertServedAgent(opts: {
  * tulisan office) maupun polos (`- slug: x`, tulisan `hermes config set`).
  */
 export async function removeServedAgent(slug: string): Promise<{ backupPath: string; removed: boolean }> {
+  assertA2aConfigWriteEnabled()
   const clean = slug.trim().toLowerCase()
   const cfgPath = configPath()
   const stamp = new Date().toISOString().replace(/[:.]/g, '-')

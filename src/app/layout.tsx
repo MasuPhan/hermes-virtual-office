@@ -1,10 +1,34 @@
+
+import { t as translate } from '@/lib/i18n'
 import type { Metadata, Viewport } from 'next'
+import { Be_Vietnam_Pro, Inter, JetBrains_Mono } from 'next/font/google'
 import './globals.css'
+
+/* OXMODE type: Be Vietnam Pro (headings), Inter (UI), JetBrains Mono (labels/code).
+   Self-hosted by next/font at build time; the Vietnamese subset covers the UI copy. */
+const head = Be_Vietnam_Pro({
+  subsets: ['latin', 'vietnamese'],
+  weight: ['500', '600', '700', '800'],
+  variable: '--font-oxm-head',
+  display: 'swap',
+})
+const body = Inter({
+  subsets: ['latin', 'vietnamese'],
+  weight: ['400', '500', '600', '700'],
+  variable: '--font-oxm-body',
+  display: 'swap',
+})
+const mono = JetBrains_Mono({
+  subsets: ['latin', 'vietnamese'],
+  weight: ['400', '500', '600'],
+  variable: '--font-oxm-mono',
+  display: 'swap',
+})
 
 export const metadata: Metadata = {
   title: 'Hermes Virtual Office',
   description:
-    'An open-source 3D virtual workspace and meeting simulator for autonomous AI agents.',
+    translate("layout.text1"),
 }
 
 /**
@@ -21,12 +45,12 @@ export const viewport: Viewport = {
   initialScale: 1,
   viewportFit: 'cover',
   interactiveWidget: 'resizes-content',
-  themeColor: '#0f1418',
+  themeColor: '#050117',
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
+    <html lang="vi" className={`${head.variable} ${body.variable} ${mono.variable}`}>
       <body>{children}</body>
     </html>
   )

@@ -1,5 +1,7 @@
 'use client'
 
+import { t as translate } from '@/lib/i18n'
+
 import { useEffect, useRef, useState } from 'react'
 
 /**
@@ -70,7 +72,7 @@ export default function Collapsible({
         <span className="vp-collapse-caret">{open ? '▾' : '▸'}</span>
         <span className="vp-collapse-label">{label}</span>
         {typeof count === 'number' && <span className="vp-collapse-count">{count}</span>}
-        <span className="vp-collapse-hint">{open ? 'sembunyikan' : 'tampilkan'}</span>
+        <span className="vp-collapse-hint">{open ? translate("Collapsible.text1") : translate("Collapsible.text2")}</span>
       </button>
 
       {open && (
@@ -80,7 +82,7 @@ export default function Collapsible({
           ) : has ? (
             <pre className="vp-pre vp-pre-block">{body}</pre>
           ) : (
-            <div className="vp-muted">{empty || 'kosong'}</div>
+            <div className="vp-muted">{empty || translate("Collapsible.text3")}</div>
           )}
         </div>
       )}

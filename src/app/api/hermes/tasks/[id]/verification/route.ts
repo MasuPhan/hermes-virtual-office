@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getTaskVerification } from '@/lib/hermes/kanban'
+import { assertApiRequest } from '@/lib/api-policy'
+import { inRequestBoard } from '@/lib/hermes/board-request'
 
 export const dynamic = 'force-dynamic'
 
@@ -10,7 +12,9 @@ export const dynamic = 'force-dynamic'
  * hanya membaca jejak review (`review_requested` → `completed`). Gagal membaca `show` = 502,
  * BUKAN "klaim" — panel harus bisa membedakan "tidak terverifikasi" dari "tidak tahu".
  */
-export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
+async function handleGET(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
+  const denied = assertApiRequest(req, 'read')
+  if (denied) return denied
   const { id } = await ctx.params
   try {
     return NextResponse.json(await getTaskVerification(id))
@@ -20,4 +24,9 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string
       { status: 502 },
     )
   }
+}
+
+/* Board scope: `?board=<slug>` → every CLI call in the handler gets `--board <slug>`. */
+export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
+  return inRequestBoard(req, () => handleGET(req, ctx))
 }

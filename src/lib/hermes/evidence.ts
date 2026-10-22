@@ -79,7 +79,7 @@ export function readEvidence(
   const items: EvidenceItem[] = []
 
   const latest = text(input.latestSummary)
-  if (latest) items.push({ kind: 'summary', label: 'ringkasan terakhir', body: latest })
+  if (latest) items.push({ kind: 'summary', label: 'Tóm tắt mới nhất', body: latest })
 
   const runSummary = text(input.lastRunSummary)
   const meta = metaLines(input.lastRunMeta)
@@ -88,12 +88,12 @@ export function readEvidence(
     const outcome = text(input.lastRunOutcome)
     items.push({
       kind: 'run',
-      label: outcome ? `run terakhir · ${outcome}` : 'run terakhir',
+      label: outcome ? `Lần chạy mới nhất · ${outcome}` : 'Lần chạy mới nhất',
       body: runBody.join('\n'),
     })
   }
 
-  if (input.hasLog) items.push({ kind: 'log', label: 'log worker tersedia' })
+  if (input.hasLog) items.push({ kind: 'log', label: 'Có nhật ký worker' })
 
   for (const name of input.attachmentNames) {
     const n = text(name)
@@ -107,9 +107,9 @@ export function readEvidence(
 
 /** Label penanda untuk kartu. Netral untuk yang tidak dinilai. */
 export const EVIDENCE_MARK_LABEL: Record<EvidenceMark, string> = {
-  proven: 'terbukti',
-  unproven: 'tanpa bukti',
+  proven: 'Có bằng chứng',
+  unproven: 'Không có bằng chứng',
   open: '',
-  unchecked: 'bukti tak diperiksa',
-  failed: 'bukti gagal dibaca',
+  unchecked: 'Chưa kiểm tra bằng chứng',
+  failed: 'Không thể đọc bằng chứng',
 }

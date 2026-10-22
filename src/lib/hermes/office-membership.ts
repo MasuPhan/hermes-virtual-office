@@ -16,18 +16,11 @@
 /**
  * Profiles that are NEVER part of the office, no matter what.
  *
- * `default` is not a colleague — it is the install's own orchestrator profile,
- * living at the Hermes root (~/.hermes/config.yaml). It shows up in the assignee
- * list because the base profile owns housekeeping work, so without this it walked
- * onto the floor as an avatar, sat in the spawn panel, appeared in the chat list
- * and could be picked as a meeting participant. None of those are meaningful: you
- * cannot hire the building's own machinery.
- *
- * This is a CONSTANT, not an entry in `hidden`: the runtime hide list is cleared
- * by a restart (which is fine for a real colleague you hid by mistake) but `default`
- * must stay gone across restarts, and `show('default')` must not bring it back.
+ * The office now runs without built-in hidden profiles. All profiles from the
+ * assignee list are visible by default. Individual profiles can still be hidden
+ * at runtime via the UI, and a restart restores full visibility.
  */
-export const BUILTIN_HIDDEN = new Set(['default'])
+export const BUILTIN_HIDDEN = new Set<string>()
 
 const hidden = new Set<string>()
 
@@ -49,8 +42,7 @@ export function hide(name: string): boolean {
 
 /** Bring a profile back. Returns false if it was not hidden. */
 export function show(name: string): boolean {
-  // A built-in exclusion cannot be undone from the UI. Without this guard the
-  // "spawn" button would put `default` back on the floor and the bug would return.
+  // Keep any future built-in exclusions separate from runtime hides.
   if (BUILTIN_HIDDEN.has(name)) return false
   return hidden.delete(name)
 }

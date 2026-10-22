@@ -34,14 +34,14 @@ export default function NewTaskDialog() {
           priority,
         }),
       })
-      if (!res.ok || !res.data) throw new Error(res.error || 'gagal membuat tugas')
-      setNote(`Dibuat: ${res.data.task.id}`)
+      if (!res.ok || !res.data) throw new Error(res.error || 'không tạo được công việc')
+      setNote(`Đã tạo: ${res.data.task.id}`)
       setTitle('')
       setBody('')
       await load()
       setTimeout(() => setOpen(false), 900)
     } catch (e) {
-      setNote(`Gagal: ${(e as Error).message}`)
+      setNote(`Thất bại: ${(e as Error).message}`)
     } finally {
       setBusy(false)
     }
@@ -51,19 +51,19 @@ export default function NewTaskDialog() {
     <div className="vp-modal-backdrop" onClick={() => setOpen(false)}>
       <div className="vp-modal" onClick={(e) => e.stopPropagation()}>
         <header className="vp-panel-head">
-          <h2>Tugas baru</h2>
-          <button className="vp-x" onClick={() => setOpen(false)} aria-label="Tutup">×</button>
+          <h2>Công việc mới</h2>
+          <button className="vp-x" onClick={() => setOpen(false)} aria-label="Đóng">×</button>
         </header>
         <div className="vp-pad flex flex-col gap-3">
-          <label className="vp-sub">JUDUL</label>
+          <label className="vp-sub">TIÊU ĐỀ</label>
           <input
             className="vp-input"
             value={title}
             onChange={(e) => setTitle(e.target.value)}
-            placeholder="Tambah test idempotensi refund"
+            placeholder="Thêm kiểm thử hoàn tiền không bị lặp"
           />
 
-          <label className="vp-sub">PENANGGUNG JAWAB</label>
+          <label className="vp-sub">NGƯỜI PHỤ TRÁCH</label>
           <select
             className="vp-input"
             value={assignee}
@@ -74,16 +74,16 @@ export default function NewTaskDialog() {
             ))}
           </select>
 
-          <label className="vp-sub">DETAIL (OPSIONAL)</label>
+          <label className="vp-sub">CHI TIẾT (KHÔNG BẮT BUỘC)</label>
           <textarea
             className="vp-input"
             rows={4}
             value={body}
             onChange={(e) => setBody(e.target.value)}
-            placeholder="Konteks, kriteria penerimaan"
+            placeholder="Bối cảnh, tiêu chí nghiệm thu"
           />
 
-          <label className="vp-sub">PRIORITAS</label>
+          <label className="vp-sub">ĐỘ ƯU TIÊN</label>
           <input
             className="vp-input"
             type="number"
@@ -92,7 +92,7 @@ export default function NewTaskDialog() {
           />
 
           <button className="vp-btn" disabled={busy || !title.trim()} onClick={submit}>
-            {busy ? 'Mengirim…' : 'Kirim ke antrean'}
+            {busy ? 'Đang gửi…' : 'Gửi vào hàng đợi'}
           </button>
           {note && <div className="vp-note">{note}</div>}
         </div>

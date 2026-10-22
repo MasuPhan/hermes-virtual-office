@@ -7,7 +7,7 @@ import KanbanColumns from './KanbanColumns'
 export default function Kanban2D() {
   return (
     <div className="vp-k2d absolute inset-0 overflow-auto p-4 pt-20">
-      <KanbanColumns />
+      <KanbanColumns search boards fullscreenLink tabs manage />
     </div>
   )
 }

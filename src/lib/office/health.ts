@@ -106,45 +106,45 @@ export function assessHealth(i: HealthInput): Health {
   // 0. Tidak bisa membaca = tidak tahu = MERAH. Ini yang paling penting: sistem yang tidak
   //    bisa melaporkan keadaannya sendiri tidak boleh tampil hijau.
   if (i.failure) {
-    return { level: 'bad', reasons: [`tidak bisa membaca keadaan sistem: ${i.failure}`] }
+    return { level: 'bad', reasons: [`Không thể đọc trạng thái hệ thống: ${i.failure}`] }
   }
 
   // 1. Pemantauan mati.
   if (i.logAgeSeconds < 0) {
-    return { level: 'bad', reasons: ['errors.log tidak ditemukan — tidak ada yang memantau'] }
+    return { level: 'bad', reasons: ['Không tìm thấy errors.log — không có dữ liệu giám sát'] }
   }
   if (i.logAgeSeconds > T.LOG_STALE_SEC) {
     return {
       level: 'bad',
-      reasons: [`log tidak bertambah ${Math.round(i.logAgeSeconds / 60)} menit — pemantauan mungkin mati`],
+      reasons: [`Nhật ký chưa cập nhật suốt ${Math.round(i.logAgeSeconds / 60)} phút — bộ giám sát có thể đã dừng`],
     }
   }
 
   // 2. Kegagalan provider. Yang membatalkan kerja yang sedang jalan.
   if (i.serverErrorCount >= T.SVR_BAD) {
-    raise('bad', `provider gagal ${i.serverErrorCount}× dalam 30 menit — kerja sedang hilang`)
+    raise('bad', `Nhà cung cấp lỗi ${i.serverErrorCount}× trong 30 phút — công việc đang bị mất`)
   } else if (i.serverErrorCount >= T.SVR_WARN) {
-    raise('warn', `provider gagal ${i.serverErrorCount}× dalam 30 menit`)
+    raise('warn', `Nhà cung cấp lỗi ${i.serverErrorCount}× trong 30 phút`)
   }
 
   // 3. Kegagalan umum.
-  if (i.errorCount >= T.ERR_BAD) raise('bad', `${i.errorCount} kegagalan dalam 30 menit`)
-  else if (i.errorCount >= T.ERR_WARN) raise('warn', `${i.errorCount} kegagalan dalam 30 menit`)
+  if (i.errorCount >= T.ERR_BAD) raise('bad', `${i.errorCount} lỗi trong 30 phút`)
+  else if (i.errorCount >= T.ERR_WARN) raise('warn', `${i.errorCount} lỗi trong 30 phút`)
 
   // 4. Biaya.
-  if (i.costUsd >= T.COST_BAD) raise('warn', `biaya sudah $${i.costUsd.toFixed(0)} — perlu keputusan`)
-  else if (i.costUsd >= T.COST_WARN) raise('warn', `biaya sudah $${i.costUsd.toFixed(0)}`)
+  if (i.costUsd >= T.COST_BAD) raise('warn', `Chi phí đã đạt $${i.costUsd.toFixed(0)} — cần quyết định`)
+  else if (i.costUsd >= T.COST_WARN) raise('warn', `Chi phí đã đạt $${i.costUsd.toFixed(0)}`)
 
   // 5. Angka biaya yang tidak lengkap. Bukan kegagalan, tapi totalnya menyesatkan.
   if (i.unpricedModels >= T.UNPRICED_WARN) {
-    raise('warn', `${i.unpricedModels} model belum ada tarifnya — total biaya adalah batas bawah`)
+    raise('warn', `${i.unpricedModels} mô hình chưa có đơn giá — tổng chi phí chỉ là mức tối thiểu`)
   }
 
   // 6. Persetujuan. Tidak bisa membaca = tidak tahu agent mana yang berhenti = merah.
   if (i.approvalsFailure) {
-    raise('bad', `tidak bisa membaca keadaan persetujuan: ${i.approvalsFailure}`)
+    raise('bad', `Không thể đọc trạng thái phê duyệt: ${i.approvalsFailure}`)
   } else if ((i.waitingApprovals ?? 0) >= APPROVAL_WAIT_WARN) {
-    raise('warn', `${i.waitingApprovals} persetujuan menunggu — agent terhambat`)
+    raise('warn', `${i.waitingApprovals} yêu cầu phê duyệt đang chờ — tác tử bị chặn`)
   }
 
   return { level, reasons }
