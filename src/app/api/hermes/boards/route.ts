@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { assertApiRequest } from '@/lib/api-policy'
+import { assertApiRequest, managementWritesEnabled, privilegedActionsEnabled } from '@/lib/api-policy'
 import { defaultBoardSlug, listBoards } from '@/lib/hermes/kanban'
 import { envBoard } from '@/lib/hermes/board-scope'
 
@@ -18,7 +18,10 @@ export async function GET(req: NextRequest) {
   if (denied) return denied
   try {
     const boards = await listBoards()
-    return NextResponse.json({ boards, defaultBoard: defaultBoardSlug(boards), envBoard: envBoard() || null })
+    // `writes`: which Kanban buttons the UI may enable (archive = management-write,
+    // delete = privileged). The server still enforces both on every write.
+    const writes = { management: managementWritesEnabled(), privileged: privilegedActionsEnabled() }
+    return NextResponse.json({ boards, defaultBoard: defaultBoardSlug(boards), envBoard: envBoard() || null, writes })
   } catch (err) {
     return NextResponse.json(
       { error: { code: 'boards_unavailable', message: (err as Error).message, status: 503 } },

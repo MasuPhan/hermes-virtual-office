@@ -134,6 +134,11 @@ async function kanban(args: string[], board?: string | null): Promise<string> {
   }
 }
 
+/** Raw CLI call for sibling modules (task-archive). Board scope + write cache-clear apply. */
+export function kanbanRaw(args: string[]): Promise<string> {
+  return kanban(args)
+}
+
 async function kanbanJson<T>(args: string[], board?: string | null): Promise<T> {
   const out = await kanban([...args, '--json'], board)
   // The CLI prints a single JSON document, but be defensive about leading notices.
