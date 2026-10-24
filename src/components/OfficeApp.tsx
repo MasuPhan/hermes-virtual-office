@@ -13,6 +13,7 @@ import CronPanel from './CronPanel'
 import SystemPanel from './SystemPanel'
 import BoardPanel from './BoardPanel'
 import ChatPanel from './ChatPanel'
+import OfficeFeed from './OfficeFeed'
 import NewTaskDialog from './NewTaskDialog'
 import KanbanModal from './KanbanModal'
 import DummySpawnDialog from './DummySpawnDialog'
@@ -54,6 +55,8 @@ export default function OfficeApp() {
   const [systemOpen, setSystemOpen] = useState(false)
   const [panelOpen, setPanelOpen] = useState(false)
   const [chatOpen, setChatOpen] = useState(false)
+  const [feedOpen, setFeedOpen] = useState(false)
+  const feedUnread = useOffice((s) => s.feedUnread)
   const [boardOpen, setBoardOpen] = useState(false)
   const [nameOpen, setNameOpen] = useState(false)
   /** Slot of a dummy avatar that was clicked, if any. */
@@ -158,6 +161,10 @@ export default function OfficeApp() {
 
         <nav className="vp-topbar-nav flex items-center gap-2" aria-label="Bảng điều khiển">
           <button className="vp-btn vp-btn-ghost" onClick={() => setNewTaskOpen(true)}>+ Công việc</button>
+          <button className="vp-btn vp-btn-ghost" onClick={() => setFeedOpen(true)}>
+            {translate('Feed.navLink')}
+            {feedUnread > 0 && <span className="vp-badge">{feedUnread}</span>}
+          </button>
           <a className="vp-btn vp-btn-ghost" href="/team">{translate('Team.navLink')}</a>
           <button className="vp-btn vp-btn-ghost" onClick={() => setMeetOpen(true)}>
             Phòng họp{meeting && meeting.state === 'running' ? ' ●' : ''}
@@ -225,6 +232,7 @@ export default function OfficeApp() {
         onClose={() => setChatOpen(false)}
         onAgentCreated={() => void loadTasks()}
       />
+      <OfficeFeed open={feedOpen} onClose={() => setFeedOpen(false)} />
       <NewTaskDialog />
       {boardOpen && <KanbanModal onClose={() => setBoardOpen(false)} />}
       {nameOpen && <OfficeNameDialog onClose={() => setNameOpen(false)} />}

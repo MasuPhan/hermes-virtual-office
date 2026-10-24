@@ -40,6 +40,7 @@ import {
   stairHeightAt,
   insideCeoRoom,
   mayEnterCeoRoom,
+  REPORT_SPOTS,
   wrapAngle,
   POOL,
   type Desk,
@@ -565,9 +566,12 @@ export function createScene(
   let cronLive = false
   /** Pasangan A2A yang masih hidup: agent → peer + meja peer. */
   let a2aLive = new Map<string, { peer: string | null; peerDesk: number | null }>()
+  /** Antrean pelapor di ruang CEO (Phòng chung): urutan = posisi berdiri. */
+  let reporting: string[] = []
 
   function setWork(w: WorkSignals) {
     chatLive = new Set(w.chatLive)
+    reporting = w.reporting ?? []
     cronLive = !!w.cron
     a2aLive = new Map((w.a2a || []).map((p) => [p.agent, { peer: p.peer, peerDesk: p.peerDesk }]))
   }
@@ -686,6 +690,7 @@ export function createScene(
       chatLive: chatLive.has(a.data.name),
       a2aPeer: a2a ? (a2a.peer ?? a.data.name) : null,
       cronLive,
+      reporting: reporting.includes(a.data.name),
     })
 
     // 0a. KERJA MENGALAHKAN ISTIRAHAT DAN JALAN-JALAN.
@@ -749,6 +754,24 @@ export function createScene(
       a.holdSeat = true
       a.activity = 'meeting'
       a.meetingTalking = meeting.currentSpeaker === a.data.name
+      return
+    }
+
+    // 1b. report: naik ke ruang CEO dan berdiri menghadap kursi bos sampai laporannya dibaca.
+    // Antrean lebih panjang dari jumlah tempat berdiri → tunggu di tempat (laporan tetap di feed).
+    if (duty === 'report') {
+      const spot = REPORT_SPOTS[reporting.indexOf(a.data.name)]
+      if (spot) {
+        a.target = new THREE.Vector3(spot.x, 0, spot.z)
+        a.targetLevel = spot.level
+        a.activity = 'idle'
+        a.arrivalFace = spot.facing
+        a.holdFace = spot.facing
+        a.holdSeat = false
+        return
+      }
+      a.target = null
+      a.activity = 'idle'
       return
     }
 
