@@ -633,7 +633,7 @@
   "Kanban.pageStat": "{{total}} công việc · {{running}} đang chạy",
   "Kanban.runHeading": "CHẠY",
   "Kanban.runDisabled": "Chạy (không khả dụng)",
-  "Kanban.runDisabledWhy": "Hermes chỉ có lệnh điều phối cho cả bảng (dispatch), không chạy riêng được một thẻ, nên văn phòng không kích hoạt nó. Thẻ ở trạng thái sẵn sàng sẽ được bộ điều phối Hermes tự nhận khi gateway đang chạy.",
+  "Kanban.runDisabledWhy": "Thẻ sẵn sàng sẽ được Hermes tự nhận khi gateway chạy",
   "Kanban.unblock": "Gỡ chặn",
   "Kanban.unblockConfirm": "Gỡ chặn và chuyển “{{title}}” sang sẵn sàng? Bộ điều phối Hermes có thể nhận thẻ ngay sau đó.",
   "Kanban.parentsNote": "Công việc chỉ được chạy khi mọi điều kiện trên đã hoàn tất.",
