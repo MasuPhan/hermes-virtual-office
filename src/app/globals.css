@@ -1653,3 +1653,17 @@ button.vp-team-tile:hover { border-color: var(--line-hover); }
   .vp-team-grid { grid-template-columns: 1fr; }
   .vp-team-nav { order: 2; margin-left: auto; }
 }
+
+/* Bộ chọn tầng trong cảnh 3D: giữa cạnh dưới, xa các panel hai bên. */
+.vp-floor-switch {
+  position: absolute;
+  left: 50%;
+  bottom: max(16px, env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  z-index: calc(var(--z-side) - 1);
+  backdrop-filter: blur(8px);
+  box-shadow: var(--shadow-card);
+}
+.vp-floor-switch button { padding: 7px 16px; font-size: 12.5px; }
+/* A link styled as a button (top bar "Đội AI") sits on the same line as the real buttons. */
+a.vp-btn { display: inline-flex; align-items: center; text-decoration: none; line-height: normal; }

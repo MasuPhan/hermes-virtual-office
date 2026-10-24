@@ -720,5 +720,9 @@
   "Team.st.running": "Đang chạy",
   "Team.st.review": "Chờ duyệt",
   "Team.st.blocked": "Bị chặn",
-  "Team.st.done": "Xong"
+  "Team.st.done": "Xong",
+  "Floor.label": "Chọn tầng để xem",
+  "Floor.all": "Cả tòa",
+  "Floor.ground": "Tầng 1",
+  "Floor.upper": "Tầng 2"
 }

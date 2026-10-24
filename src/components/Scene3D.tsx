@@ -2,8 +2,8 @@
 
 import { t as translate } from '@/lib/i18n'
 
-import { useEffect, useRef } from 'react'
-import { createScene, type OfficeScene } from '@/lib/office/scene'
+import { useEffect, useRef, useState } from 'react'
+import { createScene, type FloorView, type OfficeScene } from '@/lib/office/scene'
 import { useOffice } from '@/lib/store'
 import type { AgentDivision } from '@/types/hermes'
 
@@ -17,7 +17,25 @@ type Props = {
   onName: () => void
 }
 
+const FLOOR_KEY = 'hvo.floorView'
+const FLOORS: { view: FloorView; label: () => string }[] = [
+  { view: 'all', label: () => translate('Floor.all') },
+  { view: 0, label: () => translate('Floor.ground') },
+  { view: 1, label: () => translate('Floor.upper') },
+]
+
+/** Remembered per browser; storage can be blocked, and then the whole building shows. */
+function storedFloor(): FloorView {
+  try {
+    const v = localStorage.getItem(FLOOR_KEY)
+    return v === '0' ? 0 : v === '1' ? 1 : 'all'
+  } catch {
+    return 'all'
+  }
+}
+
 export default function Scene3D({ onScene, onDummy, onBoard, onName }: Props) {
+  const [floor, setFloor] = useState<FloorView>('all')
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const labelRef = useRef<HTMLDivElement>(null)
   const sceneRef = useRef<OfficeScene | null>(null)
@@ -53,6 +71,11 @@ export default function Scene3D({ onScene, onDummy, onBoard, onName }: Props) {
     })
     sceneRef.current = scene
     onScene(scene)
+    const remembered = storedFloor()
+    if (remembered !== 'all') {
+      scene.setFloor(remembered)
+      setFloor(remembered)
+    }
     if (process.env.NEXT_PUBLIC_E2E_HOOK === '1') {
       ;(window as unknown as { __office?: OfficeScene }).__office = scene
     }
@@ -128,6 +151,26 @@ export default function Scene3D({ onScene, onDummy, onBoard, onName }: Props) {
       {/* touch-none: tanpa ini, menyeret jari di HP men-scroll halaman, bukan memutar kamera. */}
       <canvas ref={canvasRef} className="block h-full w-full touch-none" />
       <div ref={labelRef} className="pointer-events-none absolute inset-0" />
+      <div className="vp-seg vp-floor-switch" role="group" aria-label={translate('Floor.label')}>
+        {FLOORS.map((f) => (
+          <button
+            key={String(f.view)}
+            className={floor === f.view ? 'on' : ''}
+            aria-pressed={floor === f.view}
+            onClick={() => {
+              setFloor(f.view)
+              sceneRef.current?.setFloor(f.view)
+              try {
+                localStorage.setItem(FLOOR_KEY, String(f.view))
+              } catch {
+                // per-browser convenience only
+              }
+            }}
+          >
+            {f.label()}
+          </button>
+        ))}
+      </div>
     </div>
   )
 }

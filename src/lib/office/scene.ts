@@ -37,6 +37,8 @@ import {
   visitorSpot,
   IDLE_SPOTS as OFFICE_IDLE_SPOTS,
   LEVEL_H,
+  STAIRS,
+  BARS,
   stairHeightAt,
   insideCeoRoom,
   mayEnterCeoRoom,
@@ -160,6 +162,54 @@ export type SceneEvents = {
 }
 
 const SHADOW_MIN = 0.6
+/**
+ * Which floor the camera shows. `'all'` is the whole building; 0 cuts the upper floor away so
+ * the rooms under the north bar can be seen; 1 shows the upper floor on its own.
+ */
+export type FloorView = 'all' | 0 | 1
+
+/** Render layers (0 stays "always"): a mesh lives on the ground or the upper layer. */
+const LAYER_GROUND = 2
+const LAYER_UPPER = 3
+/** Upper-floor ceiling and roof frame: above the 1.6 m dollhouse cut, so they only ever cover rooms. */
+const LAYER_UPPER_CEIL = 4
+
+/**
+ * Tag every static mesh with its floor, once, by where it sits: the upper floor exists only
+ * over the north bar, so a mesh is UPPER when it is inside that bar and its bottom is at or
+ * above the slab (minus the 0.45 m fascia under its edge); the rest is GROUND. Tall things
+ * elsewhere (the lobby sign, ceiling strips in the wings) stay on the ground floor.
+ * The stair belongs to the ground floor whole — cutting it at the slab would leave the top
+ * steps hanging. Layers rather than `visible`, because the build toggles `visible` on a few
+ * parts every frame (the rack bar, the grill fire) and would undo a floor cut.
+ */
+function tagFloors(root: THREE.Object3D) {
+  root.updateMatrixWorld(true)
+  const bb = new THREE.Box3()
+  const c = new THREE.Vector3()
+  root.traverse((o) => {
+    const m = o as THREE.Mesh & { isLine?: boolean; isPoints?: boolean }
+    if (!m.isMesh && !m.isLine && !m.isPoints) return
+    bb.setFromObject(m)
+    if (bb.isEmpty()) return
+    bb.getCenter(c)
+    const stair = c.x > STAIRS.x1 - 0.6 && c.x < STAIRS.x2 + 0.6 && c.z > STAIRS.z1 - 0.6 && c.z < STAIRS.z2 + 0.6
+    const north = c.z <= BARS.north.z2 + 0.5
+    const upper = !stair && north && bb.min.y >= LEVEL_H - 0.5
+    m.layers.set(!upper ? LAYER_GROUND : bb.min.y >= LEVEL_H + 2 ? LAYER_UPPER_CEIL : LAYER_UPPER)
+  })
+}
+
+/**
+ * Camera framing for the upper floor: nearly overhead, so the long thin north bar (56 x 12 m)
+ * reads as a floor plan. The distance follows the screen's shape (see `upperView`).
+ */
+const UPPER_TARGET = new THREE.Vector3(0, LEVEL_H, -15)
+const UPPER_DIR = new THREE.Vector3(0, 50, 21).normalize()
+/** Half the bar's width plus a margin, in metres. */
+const UPPER_HALF_W = 30
+const HOME_VIEW = { pos: new THREE.Vector3(14, 34, 40), target: new THREE.Vector3(0, 1.5, -2) }
+
 function selectiveShadow(root: THREE.Object3D, light: THREE.DirectionalLight) {
   const bb = new THREE.Box3()
   const size = new THREE.Vector3()
@@ -310,18 +360,74 @@ export function createScene(
   office.sun.shadow.radius = 4
   selectiveShadow(office.group, office.sun)
   selectiveShadow(office.streetGroup, office.sun)
+  tagFloors(office.group)
+  tagFloors(office.streetGroup)
 
   const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 400)
   // Looking down the courtyard from the south-east: the U, the pool and the open
   // division rooms all read from here.
-  camera.position.set(14, 34, 40)
+  camera.position.copy(HOME_VIEW.pos)
+  camera.layers.enable(LAYER_GROUND)
+  camera.layers.enable(LAYER_UPPER)
+  camera.layers.enable(LAYER_UPPER_CEIL)
   const controls = new OrbitControls(camera, renderer.domElement)
-  controls.target.set(0, 1.5, -2)
+  controls.target.copy(HOME_VIEW.target)
+
+  /* ------------------------------------------------------------ floors ----- */
+
+  let floorView: FloorView = 'all'
+  /**
+   * Camera glide toward a framing; null when the user is in charge of the camera. The goal is
+   * worked out every frame, so a framing asked for before the canvas had its real size (the
+   * remembered floor, applied right after creation) still lands right.
+   */
+  let glide: { to: 'upper' | 'home'; left: number } | null = null
+  /** The user has moved the camera since the last floor change: a resize must not undo that. */
+  let userMoved = false
+  controls.addEventListener('start', () => {
+    glide = null
+    userMoved = true
+  })
+
+  /** Far enough that the bar's full width fits the current aspect: a portrait phone backs off. */
+  function upperView() {
+    const halfH = Math.atan(Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) * camera.aspect)
+    const d = Math.min(140, Math.max(40, UPPER_HALF_W / Math.tan(halfH)))
+    return { pos: UPPER_TARGET.clone().addScaledVector(UPPER_DIR, d), target: UPPER_TARGET.clone() }
+  }
+
+  function setFloor(view: FloorView) {
+    const was = floorView
+    floorView = view
+    if (view === 1) camera.layers.disable(LAYER_GROUND)
+    else camera.layers.enable(LAYER_GROUND)
+    if (view === 0) camera.layers.disable(LAYER_UPPER)
+    else camera.layers.enable(LAYER_UPPER)
+    // Looking at one floor means looking INTO it: its ceiling only gets in the way.
+    if (view === 'all') camera.layers.enable(LAYER_UPPER_CEIL)
+    else camera.layers.disable(LAYER_UPPER_CEIL)
+    // Only the upper floor needs its own framing; coming back from it returns home.
+    // Between "all" and the ground floor the camera stays where the user left it.
+    userMoved = false
+    if (view === 1) glide = { to: 'upper', left: 0.9 }
+    else if (was === 1) glide = { to: 'home', left: 0.9 }
+  }
+
+  /** A body on another floor than the one shown is hidden, name tag and speech bubble too. */
+  function applyFloorToAvatars() {
+    for (const a of avatars) {
+      const shown = floorView === 'all' || a.level === floorView
+      a.avatar.group.visible = shown
+      a.label.visible = shown
+      if (!shown) a.bubble.visible = false
+    }
+  }
   controls.enableDamping = true
   controls.dampingFactor = 0.08
   controls.maxPolarAngle = Math.PI / 2.35
   controls.minDistance = 6
-  controls.maxDistance = 95
+  // 140, not 95: the upper-floor framing on a portrait phone backs off to ~131 m to fit 56 m.
+  controls.maxDistance = 140
   controls.enablePan = true
   controls.screenSpacePanning = false
 
@@ -1235,11 +1341,21 @@ export function createScene(
     // the same "has arrived" test the bench bar above uses — an avatar striding toward the bay
     // must not switch the television on before it has sat down.
     office.setTvRacing(avatars.some((a) => a.activity === 'racing' && a.walking < 0.5))
+    if (glide) {
+      // Ease toward the framing; a drag or wheel during the glide hands the camera back.
+      const k = Math.min(1, dt * 5)
+      const goal = glide.to === 'upper' ? upperView() : HOME_VIEW
+      camera.position.lerp(goal.pos, k)
+      controls.target.lerp(goal.target, k)
+      glide.left -= dt
+      if (glide.left <= 0) glide = null
+    }
     controls.update()
     // A test may drive the simulation without paying for WebGL: rendering every step made
     // even 30 frames too slow to measure over a debugger (software GL), which is what made a
     // time-dependent behaviour — a body turning to face its seat — unverifiable.
     if (!skipRender) {
+      applyFloorToAvatars()
       renderer.render(scene, camera)
       labelRenderer.render(scene, camera)
     }
@@ -1255,6 +1371,8 @@ export function createScene(
     pointer.x = ((clientX - r.left) / r.width) * 2 - 1
     pointer.y = -((clientY - r.top) / r.height) * 2 + 1
     ray.setFromCamera(pointer, camera)
+    // Pick only what is drawn: a floor that is cut away must not catch clicks.
+    ray.layers.mask = camera.layers.mask
 
     const hits = ray.intersectObjects(scene.children, true)
     for (const h of hits) {
@@ -1311,6 +1429,8 @@ export function createScene(
     labelRenderer.setSize(w, h)
     camera.aspect = w / h
     camera.updateProjectionMatrix()
+    // The upper-floor framing depends on the screen's shape; re-frame unless the user took over.
+    if (floorView === 1 && !userMoved) glide = { to: 'upper', left: 0.6 }
   }
 
   /** Kept for the OfficeApp contract; the 3D view no longer draws cards. */
@@ -1418,6 +1538,7 @@ export function createScene(
     setTasks,
     setMeeting,
     setWork,
+    setFloor,
     say,
     setHour,
     setQuality,
