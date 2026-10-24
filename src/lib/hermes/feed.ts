@@ -80,6 +80,7 @@ function db() {
 export function _resetFeedForTest(): void {
   migrated = false
   pollMemo = null
+  polledOnce = false
 }
 
 /* ------------------------------------------------------------ transitions -- */
@@ -129,7 +130,22 @@ export function pollFeed(): Promise<number> {
   if (pollMemo && Date.now() - pollMemo.at < POLL_TTL_MS) return pollMemo.run
   const run = pollOnce().catch(() => 0)
   pollMemo = { at: Date.now(), run }
+  void run.then(() => {
+    polledOnce = true
+  })
   return run
+}
+
+let polledOnce = false
+
+/**
+ * The office's own poll only needs the counts, which sit in office.db. After the first pass
+ * it starts the next pass (if one is due) and answers from what is stored, instead of making
+ * every poll wait ~2 s for a read of all boards: the report appears one pass later at worst.
+ */
+export function pollFeedSoft(): Promise<unknown> {
+  const run = pollFeed()
+  return polledOnce ? Promise.resolve() : run
 }
 
 async function pollOnce(): Promise<number> {

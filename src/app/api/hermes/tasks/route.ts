@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { activeTasksAllBoards, createTask, listAgents, listAssignees, listTasks } from '@/lib/hermes/kanban'
+import { busyOnOtherBoards, createTask, listAgents, listAssignees, listTasks } from '@/lib/hermes/kanban'
 import { scopedBoard } from '@/lib/hermes/board-scope'
 import { visible } from '@/lib/hermes/office-membership'
 import { blockedAssigneesFor } from '@/lib/hermes/approvals'
@@ -19,9 +19,13 @@ async function handleGET(req: NextRequest) {
     // 2D view has an ARSIP column that stayed permanently empty without it.
     // The two CLI reads are independent, so they run together — sequentially
     // they cost ~2.8 s per poll on a small machine.
-    const [tasks, assignees] = await Promise.all([
+    // The other boards' running cards (all-board avatar status) need no row of THIS board, so
+    // they start now too: three independent CLI rounds in parallel instead of two in a row.
+    const board = scopedBoard() || ''
+    const [tasks, assignees, elsewhere] = await Promise.all([
       listTasks({ includeArchived: true }),
       listAssignees(),
+      busyOnOtherBoards(board),
     ])
     // Apply the hide list: a hidden profile is absent from the office but its
     // tasks stay on the board, so the work is never hidden, only the avatar.
@@ -31,8 +35,7 @@ async function handleGET(req: NextRequest) {
     // Avatars aggregate busy tasks across ALL boards (Masu's decision, Batch A): a profile
     // working on another project's board must not look idle because that board is not on
     // screen. The selected board's rows are reused; other boards cost one memoised `list`.
-    const board = scopedBoard() || ''
-    const busy = await activeTasksAllBoards(tasks, board)
+    const busy = [...tasks.filter((t) => t.status === 'running' || t.status === 'review'), ...elsewhere]
     const agents = visible(await listAgents(busy, assignees, await blockedAssigneesFor(busy)))
     return NextResponse.json({ tasks, agents, board: board || null })
   } catch (err) {

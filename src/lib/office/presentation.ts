@@ -2,10 +2,16 @@ import type { Agent } from '@/types/hermes'
 import { DESKS, deskByIndex, mayEnterCeoRoom } from './layout'
 import { officeDivision, type AvatarState } from './types'
 
-/** Settings rows are not membership. A hidden real profile must never become a dummy. */
+/**
+ * Only the agents Hermes lists get a body. A saved row is a position and some settings, not
+ * membership: a hidden or deleted profile must never turn into a decoration, and the office
+ * ships no decorative dummies (`dummyRoster()` is empty). Rows left over from the old roster
+ * or from a profile that no longer exists (stored with kind 'dummy') stay in the DB but are
+ * never drawn, so a stray row can no longer put a nameless bot on the floor.
+ */
 export function sceneRows(rows: AvatarState[], agents: Pick<Agent, 'name'>[]): AvatarState[] {
   const names = new Set(agents.map((a) => a.name))
-  return rows.filter((r) => r.kind === 'dummy' || names.has(r.name))
+  return rows.filter((r) => names.has(r.name))
 }
 
 /** Office-only seats, retaining Hermes assignments when using Hermes defaults. */
