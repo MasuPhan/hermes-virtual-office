@@ -6148,6 +6148,58 @@ void (async () => {
     check('a2a-call-1: kunci-hilang=FAIL + peer resolvable + URL-penuh di prompt + kabel serve/spawn/kill + peer-profil', problems.length === 0, problems.join(' | '))
   }
 
+  /* ---------------------------------------------------------------- team -- */
+  {
+    // /team folds every board into one roster. The rules below are what a real
+    // Hermes install showed: created_by is the creating PROFILE, people are
+    // `user`/`dashboard`, triage cards may have no assignee, and an assignee can
+    // outlive its profile.
+    const { buildTeam, creatorProfile } = await import('../src/lib/hermes/team')
+    const iso = (h: number) => new Date(Date.UTC(2026, 9, 24, h)).toISOString()
+    const mk = (id: string, assignee: string | null, status: string, by: string, board: string, h = 1) =>
+      ({ id, title: id, assignee, status, priority: 0, board, createdAt: iso(h), origin: { kind: 'manual', raw: by } }) as never
+    const agent = (name: string, status: string, division: string | null) =>
+      ({ name, displayName: name, role: 'backend', division, deskIndex: null, status, domains: [], soulExists: true }) as never
+    const tasks = [
+      mk('a', 'dev', 'running', 'boss', 'b1', 3),
+      mk('b', 'dev', 'done', 'user', 'b2', 5),
+      mk('c', 'qa', 'blocked', 'boss', 'b2', 2),
+      mk('d', null, 'triage', 'user', 'b1'),
+      mk('e', 'ghost', 'todo', 'boss', 'b1'),
+      mk('f', 'dev', 'archived', 'boss', 'b1', 9),
+      mk('g', 'boss', 'todo', 'boss', 'b1'),
+      mk('h', 'idle2', 'blocked', 'user', 'b1'),
+    ]
+    const team = buildTeam({
+      profiles: ['boss', 'dev', 'qa', 'idle', 'idle2'],
+      agents: [agent('boss', 'idle', 'exec'), agent('dev', 'working', 'tech'), agent('qa', 'blocked', 'tech')],
+      tasks,
+      models: new Map([['dev', 'm1']]),
+      hidden: new Set(['qa']),
+      boards: 2,
+    })
+    const by = new Map(team.members.map((m) => [m.name, m]))
+    const problems: string[] = []
+    const dev = by.get('dev')!
+    const boss = by.get('boss')!
+    if (team.members.length !== 5) problems.push(`members ${team.members.length}, want 5 (profiles only)`)
+    if (team.members[0]?.name !== 'boss') problems.push('exec division must come first')
+    if (dev.open !== 1 || dev.done !== 1) problems.push(`dev open/done ${dev.open}/${dev.done}, want 1/1 (archived ignored)`)
+    if (dev.boards.map((b) => b.slug).join() !== 'b1') problems.push('dev boards should list only boards with open cards')
+    if (dev.delegatedIn !== 1) problems.push(`dev delegatedIn ${dev.delegatedIn}, want 1 (user cards are not delegation)`)
+    if (boss.delegatedOut !== 3) problems.push(`boss delegatedOut ${boss.delegatedOut}, want 3 (own card excluded, a deleted agent still counts)`)
+    if (dev.lastActivity !== iso(5)) problems.push('lastActivity must be the latest live card, not the archived one')
+    if (dev.model !== 'm1' || by.get('idle')!.status !== 'idle' || by.get('idle')!.open !== 0) problems.push('model/idle defaults wrong')
+    if (!by.get('qa')!.hidden) problems.push('hidden profile must stay listed and be flagged')
+    const s = team.summary
+    if (s.working !== 1 || s.blocked !== 2 || s.idle !== 2) problems.push(`summary w/b/i ${s.working}/${s.blocked}/${s.idle}, want 1/2/2 (idle + blocked card = blocked)`)
+    if (s.openTasks !== 6 || s.triageUnassigned !== 1) problems.push(`open ${s.openTasks} triage ${s.triageUnassigned}, want 6/1`)
+    if (JSON.stringify(s.orphans) !== JSON.stringify([{ name: 'ghost', open: 1 }])) problems.push('orphan assignee not reported')
+    if (creatorProfile({ origin: { kind: 'agent', ref: 'dev' } } as never, new Set(['dev'])) !== 'dev') problems.push('agent:<name> marker not read')
+    if (creatorProfile({ origin: { kind: 'manual', raw: 'dashboard' } } as never, new Set(['dev'])) !== null) problems.push('a person counted as a profile')
+    check('team: one roster over all boards — delegation, orphans, triage, archived ignored', problems.length === 0, problems.join(' | '))
+  }
+
   /* ------------------------------------------------------------- result -- */
   console.log(`\n${checks - failures}/${checks} checks passed\n`)
   if (failures) {

@@ -158,6 +158,7 @@ export default function OfficeApp() {
 
         <nav className="vp-topbar-nav flex items-center gap-2" aria-label="Bảng điều khiển">
           <button className="vp-btn vp-btn-ghost" onClick={() => setNewTaskOpen(true)}>+ Công việc</button>
+          <a className="vp-btn vp-btn-ghost" href="/team">{translate('Team.navLink')}</a>
           <button className="vp-btn vp-btn-ghost" onClick={() => setMeetOpen(true)}>
             Phòng họp{meeting && meeting.state === 'running' ? ' ●' : ''}
           </button>
