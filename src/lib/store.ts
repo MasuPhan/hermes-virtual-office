@@ -71,6 +71,10 @@ type State = {
    * Scene membacanya untuk mengirim agent ke mejanya (lihat office/duty.ts).
    */
   work: WorkSignals
+  /** Báo cáo chưa đọc ở Phòng chung (xong / bị chặn). */
+  feedUnread: number
+  /** Áp kết quả `/api/hermes/feed` (sau khi đánh dấu đã đọc) mà không chờ vòng poll sau. */
+  setFeedSummary: (s: { unread: number; reporting: string[] }) => void
 
   load: () => Promise<void>
   loadBoards: () => Promise<void>
@@ -128,13 +132,16 @@ export const useOffice = create<State>((set, get) => ({
   // tidak boleh tampil sehat — itu kebohongan yang paling gampang terjadi.
   health: { level: 'warn', reasons: ['Chưa đọc trạng thái hệ thống'] },
 
-  work: { chatLive: [], cron: null, a2a: [] },
+  work: { chatLive: [], cron: null, a2a: [], reporting: [] },
+  feedUnread: 0,
+  setFeedSummary: ({ unread, reporting }) => set((st) => ({ feedUnread: unread, work: { ...st.work, reporting } })),
 
   async loadWork() {
-    const [chat, cron, a2a] = await Promise.all([
+    const [chat, cron, a2a, feed] = await Promise.all([
       fetchJson<{ live?: string[] }>('/api/hermes/chat?live=1', { cache: 'no-store' }),
       fetchJson<{ pulse?: CronPulse | null }>('/api/hermes/cron?pulse=1', { cache: 'no-store' }),
       fetchJson<{ pairs?: A2aPair[] }>('/api/hermes/a2a/live', { cache: 'no-store' }),
+      fetchJson<{ unread?: number; reporting?: string[] }>('/api/hermes/feed?summary=1', { cache: 'no-store' }),
     ])
     // Pembacaan yang gagal dianggap "tidak ada kerja": lebih baik agent tetap jalan-jalan
     // daripada terpaku di meja selamanya karena sinyal lama yang tidak pernah padam.
@@ -143,7 +150,9 @@ export const useOffice = create<State>((set, get) => ({
         chatLive: chat.ok ? chat.data?.live ?? [] : [],
         cron: cron.ok ? cron.data?.pulse ?? null : null,
         a2a: a2a.ok ? a2a.data?.pairs ?? [] : [],
+        reporting: feed.ok ? feed.data?.reporting ?? [] : [],
       },
+      ...(feed.ok ? { feedUnread: feed.data?.unread ?? 0 } : {}),
     })
   },
 

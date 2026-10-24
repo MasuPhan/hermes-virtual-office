@@ -19,7 +19,7 @@ import type { AgentStatus } from '@/types/hermes'
  * Kerja di meja di atas review karena agent yang sedang diajak chat sedang BEKERJA, walau
  * papan masih menulis task-nya `review`.
  */
-export type Duty = 'meeting' | 'a2a' | 'desk' | 'review' | 'idle'
+export type Duty = 'meeting' | 'report' | 'a2a' | 'desk' | 'review' | 'idle'
 
 /**
  * Percakapan dianggap masih hidup selama ini setelah balasan terakhir.
@@ -50,11 +50,19 @@ export type DutyInput = {
   a2aPeer?: string | null
   /** Kantor sedang dalam keadaan "ada kerja cron" (lihat `cronPulse` — ini KEBIJAKAN). */
   cronLive: boolean
+  /**
+   * Agent INI punya laporan (kartu selesai / terblokir) yang belum dibaca di Phòng chung.
+   * Ia naik ke ruang CEO untuk melapor, kecuali sedang mengerjakan kartu lain.
+   */
+  reporting?: boolean
 }
 
 export function dutyOf(i: DutyInput): Duty {
   if (i.inMeeting) return 'meeting'
-  if (i.isDummy || !i.hasDesk) return 'idle'
+  if (i.isDummy) return 'idle'
+  // Melapor tidak butuh meja; kerja yang sedang berjalan tetap menang (laporan menunggu di feed).
+  if (i.reporting && i.status !== 'working') return 'report'
+  if (!i.hasDesk) return 'idle'
   if (i.a2aPeer) return 'a2a'
   if (i.status === 'working' || i.status === 'blocked') return 'desk'
   if (i.chatLive) return 'desk'
@@ -129,6 +137,8 @@ export type WorkSignals = {
   cron: CronPulse | null
   /** Agent dalam percakapan A2A yang masih hidup + meja lawan bicaranya. */
   a2a: A2aPair[]
+  /** Agent dengan laporan belum dibaca, urutan antre (laporan tertua dulu). */
+  reporting?: string[]
 }
 
 /**
