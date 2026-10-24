@@ -14,6 +14,15 @@ shapes measured on a real Hermes v0.21 install: `created_by` holds the creating
 profile's name, links show up as `parents`/`children` in `show`, and unassigned
 cards wait in `triage`. Every other verb is refused with exit code 3 and logged
 as WRITE_REFUSED in `<this file>.log`, so a test can prove nothing tried to write.
+
+State: when HERMES_HOME is set, `kanban create` is accepted and kept in
+`$HERMES_HOME/fake-state.json` (logged as WRITE_FAKE) so the assign flow can be
+exercised end to end. A test moves a card with the helper
+
+    scripts/fake-hermes.py --set-status <board> <task id> <status> [summary or reason]
+
+which records the same `completed`/`blocked` event (payload `summary`/`reason`)
+the real CLI writes. Nothing here ever reaches a real Hermes install.
 """
 import json
 import os
@@ -71,6 +80,41 @@ TASKS = {
     ],
     'empty-board': [],
 }
+
+
+def state_path():
+    home = os.environ.get('HERMES_HOME') or os.environ.get('HVO_HERMES_ROOT')
+    return os.path.join(home, 'fake-state.json') if home else None
+
+
+def load_state():
+    p = state_path()
+    if not p or not os.path.exists(p):
+        return {'created': {}, 'status': {}, 'events': {}}
+    with open(p, encoding='utf-8') as f:
+        return json.load(f)
+
+
+def save_state(st):
+    p = state_path()
+    with open(p + '.tmp', 'w', encoding='utf-8') as f:
+        json.dump(st, f, ensure_ascii=False)
+    os.replace(p + '.tmp', p)
+
+
+def apply_state():
+    """Overlay created cards and moved statuses on the fixture."""
+    st = load_state()
+    for board, rows in st['created'].items():
+        TASKS.setdefault(board, []).extend(rows)
+    for key, status in st['status'].items():
+        board, tid = key.split(':', 1)
+        for t in TASKS.get(board, []):
+            if t['id'] == tid:
+                t['status'] = status
+                if status == 'done':
+                    t['completed_at'] = t.get('completed_at') or NOW
+    return st
 
 
 def log(line):
@@ -135,8 +179,10 @@ def kanban(args):
             return 1
         events = [{'kind': 'created', 'created_at': t['created_at'], 'run_id': None,
                    'payload': {'assignee': t['assignee'], 'parents': t['_parents']}}]
+        events += STATE['events'].get(f"{board}:{t['id']}", [])
+        summary = next((e['payload'].get('summary') for e in reversed(events) if e['kind'] == 'completed'), None)
         out({'task': public(t), 'parents': t['_parents'], 'children': children_of(board, t['id']),
-             'comments': [], 'events': events, 'runs': [], 'latest_summary': None})
+             'comments': [], 'events': events, 'runs': [], 'latest_summary': summary})
     elif verb == 'assignees':
         names = sorted(set(PROFILES) | {t['assignee'] for t in rows if t['assignee']})
         res = []
@@ -151,6 +197,23 @@ def kanban(args):
         out([])
     elif verb in ('log', 'stats'):
         print('')
+    elif verb == 'create' and state_path():
+        opts = {'--assignee': None, '--body': '', '--created-by': 'user', '--priority': '0'}
+        i, title = 1, None
+        while i < len(args):
+            if args[i] in opts and i + 1 < len(args):
+                opts[args[i]] = args[i + 1]
+                i += 2
+            else:
+                title = title if title is not None else args[i]
+                i += 1
+        tid = 't_%08x' % (int(time.time() * 1000) & 0xffffffff)
+        row = task(tid, title or '(no title)', opts['--assignee'], 'ready', opts['--created-by'], 0)
+        row['body'] = opts['--body']
+        STATE['created'].setdefault(board, []).append(row)
+        save_state(STATE)
+        log('WRITE_FAKE kanban --board %s create %s' % (board, tid))
+        print(f'Created {tid}')
     else:
         log('WRITE_REFUSED kanban ' + ' '.join(args))
         print(f'fake hermes: refusing kanban {verb}', file=sys.stderr)
@@ -162,6 +225,17 @@ def main(argv):
     log(' '.join(argv))
     if argv[:1] == ['--init']:
         init_root(argv[1])
+        return 0
+    if argv[:1] == ['--set-status']:
+        board, tid, status = argv[1], argv[2], argv[3]
+        text = argv[4] if len(argv) > 4 else ''
+        STATE['status'][f'{board}:{tid}'] = status
+        kind = {'done': 'completed', 'blocked': 'blocked'}.get(status, 'status')
+        payload = {'summary': text} if kind == 'completed' else {'reason': text} if kind == 'blocked' else {'status': status}
+        STATE['events'].setdefault(f'{board}:{tid}', []).append(
+            {'kind': kind, 'created_at': int(time.time()), 'run_id': None, 'payload': payload})
+        save_state(STATE)
+        print(f'{board}:{tid} -> {status}')
         return 0
     if argv[:1] == ['--version']:
         print('Hermes Agent v0.0.0-fake')
@@ -187,6 +261,8 @@ def main(argv):
     print('fake hermes: unsupported command', file=sys.stderr)
     return 3
 
+
+STATE = apply_state() if state_path() else {'created': {}, 'status': {}, 'events': {}}
 
 if __name__ == '__main__':
     sys.exit(main(sys.argv[1:]))

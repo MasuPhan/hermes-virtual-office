@@ -6200,6 +6200,83 @@ void (async () => {
     check('team: one roster over all boards — delegation, orphans, triage, archived ignored', problems.length === 0, problems.join(' | '))
   }
 
+  /* --------------------------------------------------------- phòng chung -- */
+  {
+    // Reports come from diffing boards; assignments from "@agent …". Both rules are pure
+    // and pinned here, plus the office.db round trip and where a reporter stands.
+    const problems: string[] = []
+    const { transitions, reportText } = await import('../src/lib/hermes/feed')
+    const { parseAssign } = await import('../src/lib/hermes/mention')
+    const { dutyOf } = await import('../src/lib/office/duty')
+    const { REPORT_SPOTS, insideCeoRoom } = await import('../src/lib/office/layout')
+    const { blocked: navBlocked } = await import('../src/lib/office/nav')
+    const row = (id: string, status: string, assignee = 'dev') => ({ id, title: id, status, assignee, priority: 0 }) as never
+    const seen = (status: string) => ({ status, title: 'x', assignee: 'dev' }) as never
+    const prev = new Map([['a', seen('running')], ['b', seen('done')], ['c', seen('todo')], ['d', seen('blocked')]])
+    const rows = [row('a', 'done'), row('b', 'done'), row('c', 'blocked'), row('d', 'blocked'), row('e', 'done'), row('f', 'running')]
+    const got = transitions(prev, rows, true).map((t) => `${t.task.id}:${t.kind}`).join()
+    if (got !== 'a:done,c:blocked,e:done') problems.push(`transitions ${got}, want a:done,c:blocked,e:done`)
+    if (transitions(new Map(), rows, false).length) problems.push('first read of a board must only seed, never report')
+    const detail = (events: unknown[], extra = {}) => ({ events, comments: [], latestSummary: 'old summary', lastFailureError: 'boom', children: [], ...extra }) as never
+    if (reportText('done', detail([{ kind: 'completed', payload: { summary: 'API xong' } }])) !== 'API xong') problems.push('done text must be the completed summary')
+    if (reportText('blocked', detail([{ kind: 'blocked', payload: { reason: 'thiếu key' } }, { kind: 'blocked', payload: { reason: 'chờ duyệt' } }])) !== 'chờ duyệt') problems.push('blocked text must be the LATEST block reason')
+    if (reportText('blocked', detail([])) !== 'boom' || reportText('done', null) !== '') problems.push('report text fallbacks wrong')
+
+    const profiles = ['developer', 'writer', 'qa-engineer']
+    const one = parseAssign('@developer viết API thanh toán\nDùng Stripe, có test', profiles)
+    if (!one.ok || one.assignee !== 'developer' || one.title !== 'viết API thanh toán' || !one.body.includes('Stripe')) problems.push(`parse basic ${JSON.stringify(one)}`)
+    const wide = parseAssign('Nhờ ＠Writer viết bài blog', profiles)
+    if (!wide.ok || wide.assignee !== 'writer' || wide.title !== 'Nhờ viết bài blog') problems.push(`full-width @ / case ${JSON.stringify(wide)}`)
+    if (parseAssign('@developer @writer làm chung', profiles).ok) problems.push('two assignees must be refused')
+    if (parseAssign('@ghost làm gì đó', profiles).ok) problems.push('unknown agent must be refused')
+    if (parseAssign('@developer', profiles).ok) problems.push('a mention with no work must be refused')
+    if (parseAssign('viết API', profiles).ok) problems.push('text without a mention must be refused')
+    const long = parseAssign('@qa-engineer ' + 'x'.repeat(200), profiles)
+    if (!long.ok || long.title.length > 120) problems.push('title must be cut at 120 chars')
+
+    const base = { inMeeting: false, hasDesk: true, isDummy: false, chatLive: false, cronLive: false }
+    if (dutyOf({ ...base, status: 'idle', reporting: true }) !== 'report') problems.push('idle reporter must go report')
+    if (dutyOf({ ...base, status: 'blocked', reporting: true }) !== 'report') problems.push('blocked reporter must go report')
+    if (dutyOf({ ...base, status: 'working', reporting: true }) !== 'desk') problems.push('work in hand must beat reporting')
+    if (dutyOf({ ...base, inMeeting: true, status: 'idle', reporting: true }) !== 'meeting') problems.push('meeting must beat reporting')
+    if (dutyOf({ ...base, hasDesk: false, status: 'idle', reporting: true }) !== 'report') problems.push('reporting needs no desk')
+    if (dutyOf({ ...base, isDummy: true, status: 'idle', reporting: true }) !== 'idle') problems.push('dummies never report')
+
+    if (REPORT_SPOTS.length < 4) problems.push('need at least four report spots')
+    for (const [i, s] of REPORT_SPOTS.entries()) {
+      if (!insideCeoRoom(s.x, s.z)) problems.push(`report spot ${i} outside the CEO room`)
+      if (navBlocked(s.x, s.z, undefined, { level: 1 })) problems.push(`report spot ${i} (${s.x},${s.z}) is blocked`)
+      for (const t of REPORT_SPOTS.slice(i + 1)) if (Math.hypot(t.x - s.x, t.z - s.z) < 0.6) problems.push(`report spots ${i} overlap`)
+    }
+
+    // Round trip on the selftest's own temp office.db (OFFICE_DB_PATH), never a real one.
+    const db = await import('../src/lib/office/db')
+    const feed = await import('../src/lib/hermes/feed')
+    db._resetOfficeDbForTest()
+    feed._resetFeedForTest()
+    const d = db.officeDb()
+    feed.listFeed() // migrates
+    const clear = d.prepare('DELETE FROM feed_item')
+    clear.run()
+    const at = (h: number) => new Date(Date.now() - h * 3600_000).toISOString()
+    const ins = d.prepare('INSERT INTO feed_item (kind, agent, board, task_id, title, text, at) VALUES (?, ?, ?, ?, ?, ?, ?)')
+    ins.run('blocked', 'writer', 'b', 't1', 'T1', 'r', at(2))
+    ins.run('done', 'developer', 'b', 't2', 'T2', 's', at(1))
+    ins.run('done', 'developer', 'b', 't3', 'T3', 's', at(0.5))
+    ins.run('done', 'qa-engineer', 'b', 't4', 'T4', 's', at(30))
+    feed.recordAssignment({ agent: 'writer', board: 'b', taskId: 't5', title: 'T5', text: '' })
+    if (feed.unreadCount() !== 4) problems.push(`unread ${feed.unreadCount()}, want 4 (assignments are not unread)`)
+    if (feed.reportingAgents().join() !== 'writer,developer') problems.push(`queue ${feed.reportingAgents().join()}, want writer,developer (oldest first, stale excluded)`)
+    const devIds = feed.listFeed().filter((i) => i.agent === 'developer').map((i) => i.id)
+    feed.ackFeed(devIds)
+    if (feed.reportingAgents().join() !== 'writer') problems.push('acked reporter must leave the queue')
+    feed.ackFeed('all')
+    if (feed.unreadCount() !== 0 || feed.reportingAgents().length) problems.push('ack all left something unread')
+    clear.run()
+
+    check('phòng chung: reports from board diffs, @assign parsing, reporter queue and CEO-room spots', problems.length === 0, problems.join(' | '))
+  }
+
   /* ------------------------------------------------------------- result -- */
   console.log(`\n${checks - failures}/${checks} checks passed\n`)
   if (failures) {

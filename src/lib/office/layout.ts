@@ -1391,6 +1391,18 @@ export const CEO_SUITE = {
 } as const
 
 /**
+ * Where an agent stands to deliver a report (Phòng chung): two rows of four in front of the
+ * guest chairs, facing the boss chair (π = north). Index = place in the report queue.
+ *
+ * The CEO room's entry rule (`mayEnterCeoRoom`) is about loitering and desks; a reporter is
+ * called up, so it may stand here whatever its role. Rows stay clear of the guest chairs
+ * (z -16.65..-16.05) and the coffee table (x ≤ -25.3), and off the door lane at x -21.
+ */
+export const REPORT_SPOTS: readonly { x: number; z: number; level: 1; facing: number }[] = [-15.2, -14.4].flatMap((z) =>
+  [-24.4, -23.6, -22.8, -22.0].map((x) => ({ x, z, level: 1 as const, facing: Math.PI })),
+)
+
+/**
  * MEJA DIVISI EXEC = MEJA CEO YANG SUDAH ADA.
  *
  * Exec dulu punya NOL meja, jadi CEO (satu-satunya agent di kantor) mendapat `deskIndex: null`
