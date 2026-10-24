@@ -41,9 +41,12 @@ export default function KanbanPage() {
         <span className="vp-muted vp-kpage-stat">
           {error ? <span className="vp-err">{error}</span> : translate('Kanban.pageStat', { total: tasks.filter((t) => t.status !== 'archived').length, running })}
         </span>
-        <Link className="vp-chip-btn vp-kpage-back" href={back} title={translate('Kanban.backToOffice')}>
-          ⤡ {translate('Kanban.backToOffice')}
-        </Link>
+        <div className="vp-kpage-back vp-team-nav">
+          <Link className="vp-chip-btn" href="/team">{translate('Team.navLink')}</Link>
+          <Link className="vp-chip-btn" href={back} title={translate('Kanban.backToOffice')}>
+            ⤡ {translate('Kanban.backToOffice')}
+          </Link>
+        </div>
       </header>
       <main className="vp-kpage-body vp-k2d">
         <KanbanColumns search freshness boards tabs manage />
