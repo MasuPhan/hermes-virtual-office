@@ -27,3 +27,6 @@ npm-debug.log*
 
 # scratch scripts — type-checked by `next build` if left in the tree
 /tmp/
+
+# fake Hermes CLI call log (scripts/fake-hermes.py)
+scripts/fake-hermes.py.log
