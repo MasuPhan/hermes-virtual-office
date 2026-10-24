@@ -9,7 +9,7 @@ tested, so a preview runs against this script instead of ~/.local/bin/hermes:
     HERMES_BIN=scripts/fake-hermes.py HVO_HERMES_ROOT=/tmp/fake-root HERMES_HOME=/tmp/fake-root ...
 
 It answers the read verbs HVO uses (boards list, list, show, assignees, runs,
-log, attachments, stats, config get) from the fixture below, which mirrors the
+log, attachments, stats, config get, cron runs/list) from the fixture below, which mirrors the
 shapes measured on a real Hermes v0.21 install: `created_by` holds the creating
 profile's name, links show up as `parents`/`children` in `show`, and unassigned
 cards wait in `triage`. Every other verb is refused with exit code 3 and logged
@@ -179,6 +179,9 @@ def main(argv):
         out({})
         return 0
     if argv[:2] == ['sessions', 'export']:
+        return 0
+    if argv[:2] in (['cron', 'runs'], ['cron', 'list']):
+        # Read-only: the office polls recent cron runs; the fixture has none.
         return 0
     log('WRITE_REFUSED ' + ' '.join(argv))
     print('fake hermes: unsupported command', file=sys.stderr)
