@@ -74,7 +74,43 @@ const TIMEOUT_MS = Number(process.env.KANBAN_TIMEOUT_MS || 20_000)
  */
 const READ_VERBS = new Set(['list', 'show', 'runs', 'log', 'assignees', 'attachments'])
 const READ_TTL_MS = 3000
+/** `config get model`: see `profileModel`. */
+const MODEL_TTL_MS = 60_000
 const readCache = new Map<string, { at: number; out: string }>()
+/**
+ * CLI reads still running, by command line. /team, /feed, /tasks, /agents and the office all ask
+ * for the same `list` inside one poll; without this each caller spawned its own ~1.2 s Python
+ * process for an identical answer. Callers that arrive while one is running share it.
+ */
+const inflight = new Map<string, Promise<string>>()
+/** Bumped by every write: a read that STARTED before a write must not refill the cache after it. */
+let readGen = 0
+
+/** Forget every memoised read and detach the ones in flight (their result is still returned to
+ *  their own callers, but never stored). Called by every write. */
+function dropReads(): void {
+  readGen += 1
+  readCache.clear()
+  inflight.clear()
+}
+
+function sharedRead(key: string, run: () => Promise<string>, ttlMs = READ_TTL_MS): Promise<string> {
+  const hit = readCache.get(key)
+  if (hit && Date.now() - hit.at < ttlMs) return Promise.resolve(hit.out)
+  const pending = inflight.get(key)
+  if (pending) return pending
+  const gen = readGen
+  const p = run()
+    .then((out) => {
+      if (gen === readGen) readCache.set(key, { at: Date.now(), out })
+      return out
+    })
+    .finally(() => {
+      if (inflight.get(key) === p) inflight.delete(key)
+    })
+  inflight.set(key, p)
+  return p
+}
 
 /** Env without the agent-session markers the CLI treats as "inside a worker". */
 function cleanEnv(): NodeJS.ProcessEnv {
@@ -106,22 +142,19 @@ export function effectiveBoard(board?: string | null): string {
 async function kanban(args: string[], board?: string | null): Promise<string> {
   const useBoard = effectiveBoard(board)
   const full = useBoard ? ['kanban', '--board', useBoard, ...args] : ['kanban', ...args]
-  const cacheable = READ_VERBS.has(args[0])
-  const key = full.join(' ')
-  if (cacheable) {
-    const hit = readCache.get(key)
-    if (hit && Date.now() - hit.at < READ_TTL_MS) return hit.out
-  } else {
-    // A write invalidates every memo: the next read must see it.
-    readCache.clear()
-  }
+  if (READ_VERBS.has(args[0])) return sharedRead(full.join(' '), () => runKanban(full))
+  // A write invalidates every memo: the next read must see it.
+  dropReads()
+  return runKanban(full)
+}
+
+async function runKanban(full: string[]): Promise<string> {
   try {
     const { stdout } = await exec(HERMES_BIN, full, {
       env: cleanEnv(),
       timeout: TIMEOUT_MS,
       maxBuffer: 8 * 1024 * 1024,
     })
-    if (cacheable) readCache.set(key, { at: Date.now(), out: stdout })
     return stdout
   } catch (err) {
     const e = err as NodeJS.ErrnoException & { stdout?: string; stderr?: string }
@@ -492,17 +525,12 @@ export type RawProvider = {
  * under its own key: the provider list changes when the operator edits
  * config.yaml, not between polls.
  */
-async function hermesJson<T>(args: string[]): Promise<T> {
-  const cacheKey = args.join(' ')
-  const hit = readCache.get(cacheKey)
-  const out =
-    hit && Date.now() - hit.at < READ_TTL_MS
-      ? hit.out
-      : await exec(HERMES_BIN, args, { env: cleanEnv(), timeout: TIMEOUT_MS, maxBuffer: 8 * 1024 * 1024 })
-          .then(({ stdout }) => {
-            readCache.set(cacheKey, { at: Date.now(), out: stdout })
-            return stdout
-          })
+async function hermesJson<T>(args: string[], ttlMs = READ_TTL_MS): Promise<T> {
+  const out = await sharedRead(
+    args.join(' '),
+    () => exec(HERMES_BIN, args, { env: cleanEnv(), timeout: TIMEOUT_MS, maxBuffer: 8 * 1024 * 1024 }).then(({ stdout }) => stdout),
+    ttlMs,
+  )
   const start = out.search(/[[{]/)
   if (start < 0) return [] as unknown as T
   return JSON.parse(out.slice(start)) as T
@@ -523,14 +551,12 @@ async function kanbanConfig<T>(key: string): Promise<T> {
  */
 export async function profileModel(name: string): Promise<{ model: string | null; provider: string | null }> {
   try {
-    const raw = await hermesJson<{ default?: string; provider?: string } | string>([
-      '-p',
-      name,
-      'config',
-      'get',
-      'model',
-      '--json',
-    ])
+    // A profile's default model changes by hand, rarely; /team and /agents read it for every
+    // profile (one process each), so it is kept 60 s. Any HVO write drops it (`dropReads`).
+    const raw = await hermesJson<{ default?: string; provider?: string } | string>(
+      ['-p', name, 'config', 'get', 'model', '--json'],
+      MODEL_TTL_MS,
+    )
     if (typeof raw === 'string') return { model: raw || null, provider: null }
     return { model: raw?.default || null, provider: raw?.provider || null }
   } catch {
@@ -851,7 +877,7 @@ export async function ensureProviderDef(name: string, provider: string): Promise
 
 /** A TOP-LEVEL write: same cleanEnv contract, no `kanban` prefix. */
 async function hermesWrite(args: string[]): Promise<string> {
-  readCache.clear()
+  dropReads()
   try {
     const { stdout } = await exec(HERMES_BIN, args, {
       env: cleanEnv(),
@@ -1709,16 +1735,32 @@ export function isOtherBoardRow(t: Task): boolean {
 }
 
 export async function activeTasksAllBoards(selected: Task[], selectedBoard: string): Promise<Task[]> {
-  const busy = (t: Task) => t.status === 'running' || t.status === 'review'
-  const own = selected.filter(busy)
+  return [...selected.filter(isBusyTask), ...(await busyOnOtherBoards(selectedBoard))]
+}
+
+const isBusyTask = (t: Task) => t.status === 'running' || t.status === 'review'
+
+/**
+ * Running/review cards on every board EXCEPT the one on screen. It needs no rows of the
+ * selected board, so a caller can start it at the same time as the selected board's own
+ * `list` instead of after it (that wait was a whole extra ~1.2 s CLI round in every poll).
+ * A board list that cannot be read counts as "nothing busy there", as before.
+ */
+export async function busyOnOtherBoards(selectedBoard: string): Promise<Task[]> {
+  const busy = isBusyTask
   let boards: BoardInfo[]
   try {
     boards = await listBoards()
   } catch {
-    return own
+    return []
   }
   const sel = selectedBoard || defaultBoardSlug(boards)
-  const others = boards.map((b) => b.slug).filter((s) => s !== sel)
+  // `boards list` already carries per-status counts (memoised 15 s), so a board that shows
+  // nothing running or in review needs no `list` of its own: most boards, most of the time.
+  // Counts that are missing (cards but no breakdown) mean "unknown", so those are still read.
+  const mayBeBusy = (b: BoardInfo) =>
+    b.total > 0 && (Object.keys(b.counts).length === 0 || (b.counts.running ?? 0) > 0 || (b.counts.review ?? 0) > 0)
+  const others = boards.filter((b) => b.slug !== sel && mayBeBusy(b)).map((b) => b.slug)
   const key = others.join(',')
   let rest: Task[]
   if (activeMemo && activeMemo.key === key && Date.now() - activeMemo.at < ACTIVE_TTL_MS) {
@@ -1732,5 +1774,5 @@ export async function activeTasksAllBoards(selected: Task[], selectedBoard: stri
   // Rows of the board on screen keep whatever board listTasks gave them: when it is the
   // unscoped default they stay board-less, so their `show` calls share the read cache with
   // the rest of the office instead of a second `--board default` copy.
-  return [...own, ...rest]
+  return rest
 }

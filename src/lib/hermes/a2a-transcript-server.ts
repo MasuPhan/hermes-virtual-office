@@ -43,6 +43,26 @@ const EXPORT_WINDOW = process.env.A2A_EXPORT_WINDOW || '24h'
 const MAX_TEXT = 4000
 /** Jejak outbound dicari di N pesan terakhir tiap export — cukup untuk tool_call. */
 const OUTBOUND_SCAN = 400
+/**
+ * Exports run this many at a time. One Python process each (~1.2 s), and they used to run one
+ * after another: with nine profiles `/api/hermes/a2a/live` took ~12 s on every refresh.
+ */
+const EXPORT_CONCURRENCY = Math.max(1, Number(process.env.A2A_EXPORT_CONCURRENCY || 4))
+
+/** `fn` over `items`, at most `limit` at once; results keep the order of `items`. */
+async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const out = new Array<R>(items.length)
+  let next = 0
+  const worker = async () => {
+    for (;;) {
+      const i = next++
+      if (i >= items.length) return
+      out[i] = await fn(items[i])
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker))
+  return out
+}
 
 function cleanEnv(): NodeJS.ProcessEnv {
   const env = fleetRootEnv(process.env)
@@ -218,8 +238,9 @@ export async function readA2aTranscript(profiles: string[]): Promise<A2aTranscri
   const outbound: A2aOutbound[] = []
   const unreadable: string[] = []
 
-  for (const profile of profiles) {
-    const { docs, error } = await exportA2a(profile)
+  const exported = await mapLimit(profiles, EXPORT_CONCURRENCY, exportA2a)
+  for (const [i, profile] of profiles.entries()) {
+    const { docs, error } = exported[i]
     if (error) {
       unreadable.push(profile)
       continue

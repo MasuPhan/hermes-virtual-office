@@ -4,6 +4,7 @@ import { blockedAssigneesFor } from '@/lib/hermes/approvals'
 import { hiddenNames } from '@/lib/hermes/office-membership'
 import { assertApiRequest } from '@/lib/api-policy'
 import { buildTeam, type Team } from '@/lib/hermes/team'
+import { swr } from '@/lib/swr'
 import type { Task } from '@/types/hermes'
 
 export const dynamic = 'force-dynamic'
@@ -12,17 +13,15 @@ export const dynamic = 'force-dynamic'
  * GET /api/hermes/team — read-only: every profile with its cards on ALL boards.
  *
  * Cost: one `list` per board + one `config get model` per profile, each a CLI
- * process (~1.4 s). They run in parallel and the whole answer is memoised for
- * 15 s, so a page left open polls the CLI at most four times a minute.
+ * process (~1.4 s). They run in parallel; the answer is fresh for 15 s and then
+ * served instantly (stale, up to 2 min) while one refresh runs in the background,
+ * so opening the page never waits on the CLI after the first time.
  */
 const TTL_MS = 15_000
-let memo: { at: number; data: Team & { readAt: string } } | null = null
+const MAX_STALE_MS = 2 * 60_000
 
-export async function GET(req: NextRequest) {
-  const denied = assertApiRequest(req, 'read')
-  if (denied) return denied
-  if (memo && Date.now() - memo.at < TTL_MS) return NextResponse.json(memo.data)
-  try {
+const readTeam = swr(
+  async (): Promise<Team & { readAt: string }> => {
     const [boards, profiles, assignees] = await Promise.all([listBoards(), listProfiles(), listAssignees()])
     const perBoard = await Promise.all(boards.map((b) => listTasks({ board: b.slug }).catch(() => [] as Task[])))
     const tasks = perBoard.flat()
@@ -39,9 +38,16 @@ export async function GET(req: NextRequest) {
       hidden: new Set(hiddenNames()),
       boards: boards.length,
     })
-    const data = { ...team, readAt: new Date().toISOString() }
-    memo = { at: Date.now(), data }
-    return NextResponse.json(data)
+    return { ...team, readAt: new Date().toISOString() }
+  },
+  { freshMs: TTL_MS, maxStaleMs: MAX_STALE_MS },
+)
+
+export async function GET(req: NextRequest) {
+  const denied = assertApiRequest(req, 'read')
+  if (denied) return denied
+  try {
+    return NextResponse.json(await readTeam())
   } catch (err) {
     return NextResponse.json({ error: (err as Error).message }, { status: 503 })
   }

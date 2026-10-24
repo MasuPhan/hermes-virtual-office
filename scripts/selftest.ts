@@ -6277,6 +6277,63 @@ void (async () => {
     check('phòng chung: reports from board diffs, @assign parsing, reporter queue and CEO-room spots', problems.length === 0, problems.join(' | '))
   }
 
+  /* ------------------------------------------------- stray bots, slow reads -- */
+  {
+    const problems: string[] = []
+    const { sceneRows } = await import('../src/lib/office/presentation')
+    const { swr } = await import('../src/lib/swr')
+    const row = (avatarId: string, name: string, kind: string) => ({ avatarId, name, kind }) as never
+    const rows = [
+      row('agent:developer', 'developer', 'agent'),
+      row('dummy:tech:0', 'Dev Manager', 'dummy'),
+      row('agent:billy-devops-engineer', 'billy-devops-engineer', 'dummy'), // profile that no longer exists
+      row('agent:mia', 'mia', 'agent'), // hidden / not listed right now
+    ]
+    const shown = sceneRows(rows, [{ name: 'developer' }]).map((r) => r.name).join()
+    if (shown !== 'developer') problems.push(`sceneRows drew "${shown}", want only developer (no dummies, no ghosts, no unlisted rows)`)
+
+    // swr: fresh → no refresh; stale → old value now + ONE background refresh; missing → wait; errors surface only when nothing to serve
+    let calls = 0
+    let gate: (() => void) | null = null
+    let fail = false
+    const read = swr(
+      async () => {
+        calls += 1
+        if (fail) throw new Error('boom')
+        await new Promise<void>((resolve) => { gate = resolve })
+        return calls
+      },
+      { freshMs: 40, maxStaleMs: 400 },
+    )
+    const first = read()
+    const second = read() // concurrent: shares the first refresh
+    await new Promise((r) => setTimeout(r, 5))
+    ;(gate as (() => void) | null)?.()
+    const [a, b] = await Promise.all([first, second])
+    if (calls !== 1 || a !== 1 || b !== 1) problems.push(`swr concurrent callers: calls=${calls} a=${a} b=${b}, want one refresh`)
+    if ((await read()) !== 1 || calls !== 1) problems.push('swr fresh value must be returned without a refresh')
+    await new Promise((r) => setTimeout(r, 60)) // now stale
+    const t0 = Date.now()
+    const stale = await read()
+    if (stale !== 1 || Date.now() - t0 > 30) problems.push(`swr stale value must come back at once (got ${stale} after ${Date.now() - t0} ms)`)
+    await new Promise((r) => setTimeout(r, 5))
+    if (calls !== 2) problems.push(`swr stale read must start exactly one background refresh (calls=${calls})`)
+    ;(gate as (() => void) | null)?.()
+    await new Promise((r) => setTimeout(r, 5))
+    if ((await read()) !== 2) problems.push('swr must serve the refreshed value after the background refresh')
+    // a failing background refresh keeps serving the stale value…
+    await new Promise((r) => setTimeout(r, 60))
+    fail = true
+    if ((await read()) !== 2) problems.push('swr must keep serving the stale value when the refresh fails')
+    // …until it is too old, then the error surfaces
+    await new Promise((r) => setTimeout(r, 450))
+    let surfaced = false
+    try { await read() } catch { surfaced = true }
+    if (!surfaced) problems.push('swr must surface the error once the value is older than maxStaleMs')
+
+    check('stray bots + slow reads: rows without a live agent are never drawn; stale-while-revalidate serves old answers instantly', problems.length === 0, problems.join(' | '))
+  }
+
   /* ------------------------------------------------------------- result -- */
   console.log(`\n${checks - failures}/${checks} checks passed\n`)
   if (failures) {

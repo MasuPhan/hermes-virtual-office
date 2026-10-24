@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { assertApiRequest } from '@/lib/api-policy'
 import { createTask, defaultBoardSlug, listBoards, listProfiles } from '@/lib/hermes/kanban'
 import { withBoardScope } from '@/lib/hermes/board-scope'
-import { ackFeed, listFeed, pollFeed, recordAssignment, reportingAgents, unreadCount } from '@/lib/hermes/feed'
+import { ackFeed, listFeed, pollFeed, pollFeedSoft, recordAssignment, reportingAgents, unreadCount } from '@/lib/hermes/feed'
 import { parseAssign } from '@/lib/hermes/mention'
 
 export const dynamic = 'force-dynamic'
@@ -19,8 +19,10 @@ export const dynamic = 'force-dynamic'
 export async function GET(req: NextRequest) {
   const denied = assertApiRequest(req, 'read')
   if (denied) return denied
-  await pollFeed()
   const summary = new URL(req.url).searchParams.get('summary') === '1'
+  // The poll path only needs counts and must not wait for a read of every board; the panel does.
+  if (summary) await pollFeedSoft()
+  else await pollFeed()
   return NextResponse.json({
     ...(summary ? {} : { items: listFeed() }),
     unread: unreadCount(),
