@@ -1585,7 +1585,37 @@ button.vp-team-tile:hover { border-color: var(--line-hover); }
 }
 .vp-team-card[data-status='working'], .vp-team-card[data-status='review'] { border-color: var(--line-accent); }
 .vp-team-card[data-status='blocked'] { border-color: #e5726f66; }
-.vp-team-card-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.vp-team-card-head { display: flex; align-items: center; gap: 10px; }
+.vp-team-id { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.vp-team-card-head .vp-team-pill { align-self: flex-start; }
+/* Chân dung pixel: nền tối trung tính, viền theo trạng thái. */
+.vp-ava {
+  position: relative;
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: linear-gradient(180deg, #1a1f33 0%, #0f1324 100%);
+  overflow: hidden;
+}
+.vp-ava svg { display: block; }
+.vp-ava::after {
+  content: '';
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  border: 2px solid var(--bg-1);
+  background: var(--dim);
+}
+.vp-ava[data-status='working']::after, .vp-ava[data-status='review']::after { background: var(--accent); }
+.vp-ava[data-status='blocked']::after { background: var(--red); }
+.vp-ava[data-status='meeting']::after { background: var(--violet-300); }
+.vp-ava[data-status='working'], .vp-ava[data-status='review'] { border-color: var(--line-hover); }
+.vp-ava[data-status='blocked'] { border-color: #e5726f88; }
 .vp-team-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--heading); }
 .vp-team-pill {
   flex: none;

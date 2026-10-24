@@ -3,6 +3,7 @@
 import Link from 'next/link'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { fetchJson } from '@/lib/api'
+import AgentAvatar from './AgentAvatar'
 import { formatLocale, t as translate, type MessageKey } from '@/lib/i18n'
 import type { Team, TeamMember } from '@/lib/hermes/team'
 import type { AgentDivision, AgentStatus, TaskStatus } from '@/types/hermes'
@@ -50,17 +51,20 @@ function MemberCard({ m }: { m: TeamMember }) {
   return (
     <article className="vp-team-card" data-status={m.status}>
       <header className="vp-team-card-head">
-        <div className="vp-team-name">
-          <b>{m.displayName}</b>
-          {m.displayName !== m.name && <span className="vp-muted"> @{m.name}</span>}
+        <AgentAvatar name={m.name} role={m.role} status={m.status} />
+        <div className="vp-team-id">
+          <div className="vp-team-name">
+            <b>{m.displayName}</b>
+            {m.displayName !== m.name && <span className="vp-muted"> @{m.name}</span>}
+          </div>
+          <div className="vp-muted vp-team-meta">
+            {[m.role, m.model ?? translate('Team.noModel')].filter(Boolean).join(' · ')}
+            {m.hidden && <span className="vp-team-tag">{translate('Team.hidden')}</span>}
+            {!m.soulExists && <span className="vp-team-tag">{translate('Team.noSoul')}</span>}
+          </div>
         </div>
         <span className="vp-team-pill" data-status={m.status}>{statusLabel(m.status)}</span>
       </header>
-      <div className="vp-muted vp-team-meta">
-        {[m.role, m.model ?? translate('Team.noModel')].filter(Boolean).join(' · ')}
-        {m.hidden && <span className="vp-team-tag">{translate('Team.hidden')}</span>}
-        {!m.soulExists && <span className="vp-team-tag">{translate('Team.noSoul')}</span>}
-      </div>
       {m.domains.length > 0 && (
         <div className="vp-team-domains">
           {m.domains.map((d) => (

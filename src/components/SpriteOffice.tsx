@@ -13,10 +13,11 @@ import {
   BARS, BBQ, DESKS, DOOR, FOOTPRINTS, GARDEN_BEDS, GYM, HALF_D, HALF_W,
   IDLE_SPOTS, KANBAN_BOARD, LEVEL_H, LOUNGE, MEETING_ROOMS, MEETING_ROOM_IDS,
   MEETING_TABLES, PANTRY, PANTRY_STOOLS, PANTRY_STOOL_GAP, PLANTING, POOL, POOL_BENCHES,
-  POOL_LOUNGERS, RECEPTION, ROLE_COLORS, STAIRS, WALL_T,
+  POOL_LOUNGERS, RECEPTION, STAIRS, WALL_T,
   deskSeatWorld, meetingRoomFor, roomCentre, visitorSpot,
 } from '@/lib/office/layout'
 import { route, stairCentre } from '@/lib/office/nav'
+import { personLook } from '@/lib/office/look'
 
 /*
  * Isometric pixel map of the SAME office the 3D view builds.
@@ -458,10 +459,8 @@ function person(
   seated: boolean, selected: boolean, talking: boolean, dir: Dir, moving: boolean,
 ) {
   const [cx, cy] = at(x, z)
-  const color = `#${(ROLE_COLORS[a.role] ?? 0x5b91a6).toString(16).padStart(6, '0')}`
+  const { shirt: color, skin, hair } = personLook(a.name, a.role)
   const seed = [...a.name].reduce((n, ch) => (n * 31 + ch.charCodeAt(0)) | 0, 7) >>> 0
-  const skin = ['#f0c49c', '#d79a71', '#b4765a', '#e8b489', '#7f513e'][seed % 5]
-  const hair = ['#2f2a2b', '#584033', '#1d2a2f', '#a25d3c', '#c3a05e'][seed % 5]
   // Two-frame walk cycle while moving, a slow breath while standing still, a
   // rock while seated — the FF6 trick: motion reads from the pose, not the frame rate.
   const frame = moving ? (Math.floor(t * 6) % 2 ? 1 : -1) : 0
