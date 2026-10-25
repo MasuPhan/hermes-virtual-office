@@ -80,16 +80,23 @@ export function presenceRows(i: PresenceInput): PresenceRow[] {
   return rows.sort((x, y) => RANK[x.kind] - RANK[y.kind] || x.name.localeCompare(y.name))
 }
 
-export type PresenceSummary = { waiting: number; together: number; working: number; idle: number }
+export type PresenceGroup = 'waiting' | 'together' | 'working' | 'idle'
+
+/** The four sections of the overlay, in the order they are listed. */
+export const PRESENCE_GROUPS: readonly PresenceGroup[] = ['waiting', 'together', 'working', 'idle']
+
+export function presenceGroup(kind: PresenceKind): PresenceGroup {
+  if (kind === 'blocked' || kind === 'reporting' || kind === 'review') return 'waiting'
+  if (kind === 'meeting' || kind === 'talking') return 'together'
+  if (kind === 'working' || kind === 'chat') return 'working'
+  return 'idle'
+}
+
+export type PresenceSummary = Record<PresenceGroup, number>
 
 /** The four numbers in the overlay header. */
 export function presenceSummary(rows: PresenceRow[]): PresenceSummary {
   const s: PresenceSummary = { waiting: 0, together: 0, working: 0, idle: 0 }
-  for (const r of rows) {
-    if (r.kind === 'blocked' || r.kind === 'reporting' || r.kind === 'review') s.waiting += 1
-    else if (r.kind === 'meeting' || r.kind === 'talking') s.together += 1
-    else if (r.kind === 'working' || r.kind === 'chat') s.working += 1
-    else s.idle += 1
-  }
+  for (const r of rows) s[presenceGroup(r.kind)] += 1
   return s
 }

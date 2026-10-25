@@ -5,7 +5,15 @@ import AgentAvatar from './AgentAvatar'
 import { fetchJson } from '@/lib/api'
 import { useOffice } from '@/lib/store'
 import { t as translate } from '@/lib/i18n'
-import { presenceRows, presenceSummary, type PresenceKind, type PresenceRow } from '@/lib/office/presence'
+import {
+  PRESENCE_GROUPS,
+  presenceGroup,
+  presenceRows,
+  presenceSummary,
+  type PresenceGroup,
+  type PresenceKind,
+  type PresenceRow,
+} from '@/lib/office/presence'
 import type { TeamMember } from '@/lib/hermes/team'
 import type { AgentStatus } from '@/types/hermes'
 
@@ -113,12 +121,19 @@ export default function AgentStatusOverlay() {
     }
   }
 
-  const chips: { key: string; n: number; label: string }[] = [
-    { key: 'waiting', n: sum.waiting, label: translate('Roster.sumWaiting', { n: sum.waiting }) },
-    { key: 'together', n: sum.together, label: translate('Roster.sumTogether', { n: sum.together }) },
-    { key: 'working', n: sum.working, label: translate('Roster.sumWorking', { n: sum.working }) },
-    { key: 'idle', n: sum.idle, label: translate('Roster.sumIdle', { n: sum.idle }) },
-  ]
+  const groupLabel: Record<PresenceGroup, string> = {
+    waiting: translate('Roster.groupWaiting'),
+    together: translate('Roster.groupTogether'),
+    working: translate('Roster.groupWorking'),
+    idle: translate('Roster.groupIdle'),
+  }
+  const counts: Record<PresenceGroup, string> = {
+    waiting: translate('Roster.sumWaiting', { n: sum.waiting }),
+    together: translate('Roster.sumTogether', { n: sum.together }),
+    working: translate('Roster.sumWorking', { n: sum.working }),
+    idle: translate('Roster.sumIdle', { n: sum.idle }),
+  }
+  const total = rows.length || 1
 
   return (
     <aside className="vp-roster" aria-label={translate('Roster.title')}>
@@ -129,42 +144,58 @@ export default function AgentStatusOverlay() {
         aria-expanded={!collapsed}
         title={collapsed ? translate('Roster.expand') : translate('Roster.collapse')}
       >
-        <b>{translate('Roster.title')}</b>
-        <span className="vp-roster-chips">
-          {chips
-            .filter((c) => c.n > 0)
-            .map((c) => (
-              <span key={c.key} className="vp-roster-chip" data-k={c.key}>
-                {c.label}
-              </span>
-            ))}
+        <span className="vp-roster-title">
+          <b>{translate('Roster.title')}</b>
+          <span className="vp-roster-caret" aria-hidden="true">{collapsed ? '＋' : '－'}</span>
         </span>
-        <span className="vp-roster-caret" aria-hidden="true">{collapsed ? '▸' : '▾'}</span>
+        <span className="vp-roster-bar" aria-hidden="true">
+          {PRESENCE_GROUPS.filter((g) => sum[g] > 0).map((g) => (
+            <i key={g} data-g={g} style={{ flexGrow: sum[g] / total }} />
+          ))}
+        </span>
+        <span className="vp-roster-counts">
+          {PRESENCE_GROUPS.filter((g) => sum[g] > 0).map((g) => (
+            <span key={g} data-g={g}>
+              {counts[g]}
+            </span>
+          ))}
+        </span>
       </button>
       {!collapsed && (
-        <ul className="vp-roster-list">
-          {rows.length === 0 && <li className="vp-muted vp-roster-empty">{translate('Roster.empty')}</li>}
-          {rows.map((r) => {
-            const text = describe(r)
+        <div className="vp-roster-body">
+          {rows.length === 0 && <p className="vp-muted vp-roster-empty">{translate('Roster.empty')}</p>}
+          {PRESENCE_GROUPS.map((g) => {
+            const inGroup = rows.filter((r) => presenceGroup(r.kind) === g)
+            if (!inGroup.length) return null
             return (
-              <li key={r.name}>
-                <button
-                  type="button"
-                  className={`vp-roster-row${selected === r.name ? ' on' : ''}`}
-                  data-kind={r.kind}
-                  onClick={() => select(r.name)}
-                  title={`${r.name} — ${text}`}
-                >
-                  <AgentAvatar name={r.name} role={roles.get(r.name) ?? null} status={DOT[r.kind]} size={30} />
-                  <span className="vp-roster-txt">
-                    <b>{r.name}</b>
-                    <span>{text}</span>
-                  </span>
-                </button>
-              </li>
+              <section key={g} className="vp-roster-sec" data-g={g}>
+                <h3>{groupLabel[g]}</h3>
+                <ul>
+                  {inGroup.map((r) => {
+                    const text = describe(r)
+                    return (
+                      <li key={r.name}>
+                        <button
+                          type="button"
+                          className="vp-roster-row"
+                          data-sel={selected === r.name ? '1' : undefined}
+                          onClick={() => select(r.name)}
+                          title={`${r.name} — ${text}`}
+                        >
+                          <AgentAvatar name={r.name} role={roles.get(r.name) ?? null} status={DOT[r.kind]} size={32} />
+                          <span className="vp-roster-txt">
+                            <b>{r.name}</b>
+                            <span>{text}</span>
+                          </span>
+                        </button>
+                      </li>
+                    )
+                  })}
+                </ul>
+              </section>
             )
           })}
-        </ul>
+        </div>
       )}
     </aside>
   )

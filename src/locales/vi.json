@@ -762,5 +762,9 @@
   "Roster.reviewNoTask": "Chờ duyệt",
   "Roster.blocked": "Chờ anh quyết định · {{n}} thẻ bị chặn",
   "Roster.blockedNoCount": "Đang bị chặn",
-  "Roster.idle": "Rảnh"
+  "Roster.idle": "Rảnh",
+  "Roster.groupWaiting": "Chờ anh",
+  "Roster.groupTogether": "Phối hợp",
+  "Roster.groupWorking": "Đang làm",
+  "Roster.groupIdle": "Rảnh"
 }

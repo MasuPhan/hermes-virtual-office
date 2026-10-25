@@ -1756,72 +1756,90 @@ a.vp-btn { display: inline-flex; align-items: center; text-decoration: none; lin
 .vp-feed-confirm-title { color: var(--heading); font-weight: 600; }
 
 /* ------------------------------------------------- Trạng thái đội (overlay) -- */
-/* Góc trái, dưới thanh trên; phải đã có thẻ agent và ngăn kéo công việc. Nằm dưới mọi panel. */
+/* Góc trái, dưới thanh trên; phải đã có thẻ agent và ngăn kéo công việc. Nằm dưới mọi panel.
+   Không vạch màu từng dòng: trạng thái nằm ở chấm trên avatar, màu chữ dòng phụ và nhãn nhóm. */
 .vp-roster {
+  --g-waiting: var(--amber);
+  --g-together: var(--violet-300);
+  --g-working: var(--accent);
+  --g-idle: var(--dim);
   position: absolute;
   left: 12px;
   top: calc(var(--vp-topbar-h, 70px) + 20px);
   z-index: calc(var(--z-side) - 1);
-  width: 268px;
+  width: 272px;
   max-height: calc(100dvh - var(--vp-topbar-h, 70px) - 90px);
   display: flex;
   flex-direction: column;
-  background: var(--panel);
+  background: color-mix(in srgb, var(--bg-1) 78%, transparent);
   border: 1px solid var(--line);
-  border-radius: 16px;
+  border-radius: 22px;
   box-shadow: var(--shadow-card);
-  -webkit-backdrop-filter: blur(14px);
-  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(18px) saturate(1.2);
+  backdrop-filter: blur(18px) saturate(1.2);
   overflow: hidden;
 }
 .vp-roster-head {
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px 8px;
-  padding: 9px 12px;
+  flex-direction: column;
+  gap: 8px;
+  padding: 13px 16px 12px;
   border: 0;
   background: transparent;
   color: var(--heading);
   font: inherit;
-  font-size: 12.5px;
   text-align: left;
   cursor: pointer;
 }
-.vp-roster-head b { font-weight: 700; letter-spacing: 0.02em; }
-.vp-roster-caret { margin-left: auto; color: var(--dim); }
-.vp-roster-chips { display: flex; flex-wrap: wrap; gap: 4px; flex-basis: 100%; order: 3; }
-.vp-roster-chip { padding: 1px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); font-size: 11px; }
-.vp-roster-chip[data-k='waiting'] { color: var(--amber); border-color: #f0b55666; }
-.vp-roster-chip[data-k='together'] { color: var(--violet-300); border-color: #8e70f566; }
-.vp-roster-chip[data-k='working'] { color: var(--accent); border-color: var(--line-accent); }
-.vp-roster-list { list-style: none; margin: 0; padding: 0 6px 8px; overflow-y: auto; border-top: 1px solid var(--line); }
-.vp-roster-empty { padding: 10px 8px; }
+.vp-roster-title { display: flex; align-items: center; justify-content: space-between; }
+.vp-roster-title b { font: 600 13px/1.2 var(--font-title); letter-spacing: 0.01em; }
+.vp-roster-caret { color: var(--dim); font-size: 13px; }
+.vp-roster-bar { display: flex; gap: 3px; height: 4px; }
+.vp-roster-bar i { flex-basis: 0; min-width: 6px; border-radius: 999px; background: var(--g, var(--dim)); }
+.vp-roster-bar i[data-g='waiting'], .vp-roster-counts [data-g='waiting']::before { --g: var(--g-waiting); }
+.vp-roster-bar i[data-g='together'], .vp-roster-counts [data-g='together']::before { --g: var(--g-together); }
+.vp-roster-bar i[data-g='working'], .vp-roster-counts [data-g='working']::before { --g: var(--g-working); }
+.vp-roster-bar i[data-g='idle'], .vp-roster-counts [data-g='idle']::before { --g: var(--g-idle); }
+.vp-roster-counts { display: flex; flex-wrap: wrap; gap: 2px 12px; font-size: 11.5px; color: var(--muted); }
+.vp-roster-counts span { display: inline-flex; align-items: center; gap: 5px; }
+.vp-roster-counts span::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--g, var(--dim)); }
+.vp-roster-body { overflow-y: auto; padding: 0 8px 10px; }
+.vp-roster-empty { margin: 8px; }
+.vp-roster-sec { margin-top: 6px; }
+.vp-roster-sec h3 {
+  margin: 8px 8px 2px;
+  font: 600 10.5px/1.2 var(--font-ui);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+.vp-roster-sec[data-g='waiting'] h3 { color: var(--g-waiting); }
+.vp-roster-sec ul { list-style: none; margin: 0; padding: 0; }
 .vp-roster-row {
   display: flex;
   align-items: center;
-  gap: 9px;
+  gap: 10px;
   width: 100%;
-  padding: 5px 6px;
+  padding: 6px 8px;
   border: 0;
-  border-left: 3px solid transparent;
-  border-radius: 10px;
+  border-radius: 12px;
   background: transparent;
   color: var(--text);
   font: inherit;
   text-align: left;
   cursor: pointer;
 }
-.vp-roster-row:hover { background: var(--accent-soft); }
-.vp-roster-row.on { background: #2efcff12; }
-.vp-roster-row[data-kind='blocked'], .vp-roster-row[data-kind='reporting'], .vp-roster-row[data-kind='review'] { border-left-color: var(--amber); }
-.vp-roster-row[data-kind='meeting'], .vp-roster-row[data-kind='talking'] { border-left-color: var(--violet-300); }
-.vp-roster-row[data-kind='working'], .vp-roster-row[data-kind='chat'] { border-left-color: var(--accent); }
-.vp-roster-row[data-kind='idle'] { opacity: 0.72; }
-.vp-roster-txt { display: flex; flex-direction: column; min-width: 0; line-height: 1.25; }
+.vp-roster-row:hover { background: #ffffff0d; }
+.vp-roster-row[data-sel='1'] .vp-ava { box-shadow: 0 0 0 2px var(--accent); }
+.vp-roster-txt { display: flex; flex-direction: column; min-width: 0; line-height: 1.3; }
 .vp-roster-txt b { font-size: 12.5px; font-weight: 600; color: var(--heading); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .vp-roster-txt span { font-size: 11.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.vp-roster-row .vp-ava::after { width: 8px; height: 8px; right: 1px; bottom: 1px; }
+.vp-roster-sec[data-g='waiting'] .vp-roster-txt span { color: var(--g-waiting); }
+.vp-roster-sec[data-g='together'] .vp-roster-txt span { color: var(--g-together); }
+.vp-roster-sec[data-g='working'] .vp-roster-txt span { color: var(--g-working); }
+.vp-roster-sec[data-g='idle'] .vp-roster-row { opacity: 0.7; }
+.vp-roster-row .vp-ava { border-radius: 50%; }
+.vp-roster-row .vp-ava::after { width: 9px; height: 9px; right: -1px; bottom: -1px; }
 @media (max-width: 720px) {
   .vp-roster { width: min(300px, calc(100vw - 24px)); top: calc(var(--vp-topbar-h, 96px) + 18px); }
 }
