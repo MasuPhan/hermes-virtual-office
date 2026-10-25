@@ -86,6 +86,11 @@ const inflight = new Map<string, Promise<string>>()
 /** Bumped by every write: a read that STARTED before a write must not refill the cache after it. */
 let readGen = 0
 
+/** Changes with every write: lets a cache built on CLI reads tell that its answer is out of date. */
+export function readGeneration(): number {
+  return readGen
+}
+
 /** Forget every memoised read and detach the ones in flight (their result is still returned to
  *  their own callers, but never stored). Called by every write. */
 function dropReads(): void {

@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { fetchJson } from '@/lib/api'
 import AgentAvatar from './AgentAvatar'
 import { formatLocale, t as translate, type MessageKey } from '@/lib/i18n'
+import { ago } from '@/lib/ago'
 import type { Team, TeamMember } from '@/lib/hermes/team'
 import type { AgentDivision, AgentStatus, TaskStatus } from '@/types/hermes'
 
@@ -28,18 +29,6 @@ function matches(m: TeamMember, f: Filter): boolean {
   if (f === 'all') return true
   if (f === 'working') return m.status === 'working' || m.status === 'review'
   return m.status === f
-}
-
-const rtf = new Intl.RelativeTimeFormat(formatLocale, { numeric: 'auto' })
-function ago(iso: string): string {
-  const sec = (new Date(iso).getTime() - Date.now()) / 1000
-  const steps: [Intl.RelativeTimeFormatUnit, number][] = [['second', 60], ['minute', 60], ['hour', 24], ['day', 30], ['month', 12]]
-  let v = sec
-  for (const [unit, size] of steps) {
-    if (Math.abs(v) < size) return rtf.format(Math.round(v), unit)
-    v /= size
-  }
-  return rtf.format(Math.round(v), 'year')
 }
 
 function taskHref(id: string, board?: string): string {

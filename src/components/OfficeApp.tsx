@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react'
 import dynamic from 'next/dynamic'
 import Kanban2D from './Kanban2D'
-import { UI_ROLE_LABEL, uiState } from './UiLabels'
+import { uiState } from './UiLabels'
 import SpriteOffice from './SpriteOffice'
 import PeekPanel from './PeekPanel'
 import TaskPanel from './TaskPanel'
@@ -15,6 +15,7 @@ import BoardPanel from './BoardPanel'
 import ChatPanel from './ChatPanel'
 import OfficeFeed from './OfficeFeed'
 import AgentStatusOverlay from './AgentStatusOverlay'
+import AgentJourneyPanel from './AgentJourneyPanel'
 import NewTaskDialog from './NewTaskDialog'
 import KanbanModal from './KanbanModal'
 import DummySpawnDialog from './DummySpawnDialog'
@@ -44,7 +45,6 @@ export default function OfficeApp() {
   const error = useOffice((s) => s.error)
   const meeting = useOffice((s) => s.meeting)
   const select = useOffice((s) => s.select)
-  const selected = useOffice((s) => s.selectedAgent)
   const loadTasks = useOffice((s) => s.load)
 
   const sceneRef = useRef<OfficeScene | null>(null)
@@ -198,27 +198,8 @@ export default function OfficeApp() {
       {/* ---------------------------------------------- team status, at a glance */}
       {view !== '2d' && <AgentStatusOverlay />}
 
-      {/* ------------------------------------------------------- agent card */}
-      {selected && (() => {
-        const a = agents.find((x) => x.name === selected)
-        const t = tasks.find((x) => x.id === a?.currentTaskId)
-        if (!a) return null
-        return (
-          <aside className="vp-card-float">
-            <div className="flex items-center justify-between">
-              <b>{a.displayName}</b>
-              <button className="vp-x" onClick={() => select(null)} aria-label="Đóng">×</button>
-            </div>
-            <div className="vp-kv"><span>vai trò</span><b>{UI_ROLE_LABEL[a.role] ?? a.role}</b></div>
-            <div className="vp-kv"><span>trạng thái</span><b>{uiState(a.status)}</b></div>
-            <div className="vp-kv"><span>công việc</span><b>{t?.title || a.currentTaskTitle || '—'}</b></div>
-            {!t && a.currentTaskBoard && (
-              <div className="vp-kv"><span>{translate('Kanban.boardLabel')}</span><b>{a.currentTaskBoard}</b></div>
-            )}
-          </aside>
-        )
-      })()}
-
+      {/* ------------------- click an agent in the roster → what it needs from you */}
+      <AgentJourneyPanel />
 
       <TaskPanel />
       <PeekPanel />

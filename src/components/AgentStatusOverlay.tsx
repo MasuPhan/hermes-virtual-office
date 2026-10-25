@@ -2,38 +2,23 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import AgentAvatar from './AgentAvatar'
-import { fetchJson } from '@/lib/api'
+import { usePresence } from './usePresence'
 import { useOffice } from '@/lib/store'
 import { t as translate } from '@/lib/i18n'
 import {
   PRESENCE_GROUPS,
+  presenceDot,
   presenceGroup,
-  presenceRows,
   presenceSummary,
   type PresenceGroup,
-  type PresenceKind,
   type PresenceRow,
 } from '@/lib/office/presence'
-import type { TeamMember } from '@/lib/hermes/team'
-import type { AgentStatus } from '@/types/hermes'
 
 const STORE_KEY = 'hvo.roster.collapsed'
 /** /api/hermes/team answers from a stale-while-revalidate cache, so this is cheap. */
 const TEAM_POLL_MS = 15_000
 
-/** What the dot on the portrait shows, reusing the status colours of the rest of the office. */
-const DOT: Record<PresenceKind, AgentStatus> = {
-  meeting: 'meeting',
-  talking: 'meeting',
-  working: 'working',
-  chat: 'working',
-  reporting: 'review',
-  review: 'review',
-  blocked: 'blocked',
-  idle: 'idle',
-}
-
-function describe(r: PresenceRow): string {
+export function describePresence(r: PresenceRow): string {
   switch (r.kind) {
     case 'meeting':
       return translate('Roster.meeting', { topic: r.topic || '…' })
@@ -50,7 +35,7 @@ function describe(r: PresenceRow): string {
     case 'blocked':
       return r.blockedCards ? translate('Roster.blocked', { n: r.blockedCards }) : translate('Roster.blockedNoCount')
     default:
-      return translate('Roster.idle')
+      return r.queued ? translate('Roster.idleQueued', { n: r.queued }) : translate('Roster.idle')
   }
 }
 
@@ -61,14 +46,12 @@ function describe(r: PresenceRow): string {
  */
 export default function AgentStatusOverlay() {
   const agents = useOffice((s) => s.agents)
-  const meeting = useOffice((s) => s.meeting)
-  const work = useOffice((s) => s.work)
+  const loadTeam = useOffice((s) => s.loadTeam)
   const select = useOffice((s) => s.select)
   const selected = useOffice((s) => s.selectedAgent)
 
   // null until mounted: the stored choice and the screen width are only known in the browser.
   const [collapsed, setCollapsed] = useState<boolean | null>(null)
-  const [team, setTeam] = useState<TeamMember[]>([])
 
   useEffect(() => {
     let stored: string | null = null
@@ -81,32 +64,13 @@ export default function AgentStatusOverlay() {
   }, [])
 
   useEffect(() => {
-    let alive = true
-    const load = async () => {
-      const res = await fetchJson<{ members: TeamMember[] }>('/api/hermes/team', { cache: 'no-store' })
-      if (alive && res.ok && res.data) setTeam(res.data.members)
-    }
-    void load()
-    const id = setInterval(() => void load(), TEAM_POLL_MS)
-    return () => {
-      alive = false
-      clearInterval(id)
-    }
-  }, [])
+    void loadTeam()
+    const id = setInterval(() => void loadTeam(), TEAM_POLL_MS)
+    return () => clearInterval(id)
+  }, [loadTeam])
 
   const roles = useMemo(() => new Map(agents.map((a) => [a.name, a.role])), [agents])
-  const rows = useMemo(
-    () =>
-      presenceRows({
-        agents,
-        meeting,
-        a2a: work.a2a ?? [],
-        chatLive: work.chatLive ?? [],
-        reporting: work.reporting ?? [],
-        blockedCards: Object.fromEntries(team.map((m) => [m.name, m.counts.blocked ?? 0])),
-      }),
-    [agents, meeting, work, team],
-  )
+  const rows = usePresence()
   const sum = presenceSummary(rows)
 
   if (collapsed === null) return null
@@ -172,7 +136,7 @@ export default function AgentStatusOverlay() {
                 <h3>{groupLabel[g]}</h3>
                 <ul>
                   {inGroup.map((r) => {
-                    const text = describe(r)
+                    const text = describePresence(r)
                     return (
                       <li key={r.name}>
                         <button
@@ -182,7 +146,7 @@ export default function AgentStatusOverlay() {
                           onClick={() => select(r.name)}
                           title={`${r.name} — ${text}`}
                         >
-                          <AgentAvatar name={r.name} role={roles.get(r.name) ?? null} status={DOT[r.kind]} size={32} />
+                          <AgentAvatar name={r.name} role={roles.get(r.name) ?? null} status={presenceDot(r.kind)} size={32} />
                           <span className="vp-roster-txt">
                             <b>{r.name}</b>
                             <span>{text}</span>

@@ -416,6 +416,9 @@ console.log('geometry')
   // checked per file, not just that the file exists.
   const routes: Record<string, string[]> = {
     'src/app/api/hermes/tasks/route.ts': ['GET', 'POST'],
+    'src/app/api/hermes/team/route.ts': ['GET'],
+    'src/app/api/hermes/team/[name]/route.ts': ['GET'],
+    'src/app/api/hermes/feed/route.ts': ['GET', 'POST'],
     'src/app/api/hermes/tasks/[id]/route.ts': ['GET', 'POST'],
     'src/app/api/hermes/meeting/route.ts': ['GET', 'POST'],
     'src/app/api/hermes/meeting/actions/route.ts': ['GET'],
@@ -6376,9 +6379,90 @@ void (async () => {
     // a finished or queued-but-not-live meeting must not claim anyone
     const over = presenceRows({ agents: [ag('a', 'idle')], meeting: { state: 'done', topic: 't', participants: ['a'] } as never, a2a: [], chatLive: [], reporting: [] })
     if (over[0].kind !== 'idle') problems.push('a finished meeting must not hold its participants')
+    // an idle agent with cards waiting in its queue says so (so the operator does not double-assign)
+    const q = presenceRows({ agents: [ag('free', 'idle'), ag('busy', 'idle')], meeting: null, a2a: [], chatLive: [], reporting: [], queuedCards: { busy: 2 } })
+    if (q.find((r) => r.name === 'busy')?.queued !== 2 || q.find((r) => r.name === 'free')?.queued !== undefined) problems.push('idle must carry its queue size only when it has one')
     // an approval-blocked agent with no card count still reads blocked
     if (presenceRows({ agents: [ag('b', 'blocked')], meeting: null, a2a: [], chatLive: [], reporting: [] })[0].kind !== 'blocked') problems.push('status blocked must read blocked')
     check('status overlay: one line per agent — call/meeting/work/needs-you/idle, ordered by what needs the operator', problems.length === 0, problems.join(' | '))
+  }
+
+  /* ------------------------------------------------------- agent journey -- */
+  {
+    // What the agent panel opens on: the blocked cards with Hermes's own reason, oldest wait first.
+    const problems: string[] = []
+    const { buildBrief, detailIds } = await import('../src/lib/hermes/agent-brief')
+    const { swr } = await import('../src/lib/swr')
+    const day = 86_400
+    const t0 = Math.floor(Date.now() / 1000)
+    const card = (id: string, status: string, assignee = 'dev', extra: Record<string, unknown> = {}) =>
+      ({ id, title: `T-${id}`, status, assignee, priority: 0, board: 'b1', ...extra }) as never
+    const tasks = [
+      card('new', 'blocked'),
+      card('old', 'blocked'),
+      card('dep', 'blocked'),
+      card('rev', 'review'),
+      card('run', 'running'),
+      card('q1', 'ready'),
+      card('tri', 'triage'),
+      card('d1', 'done', 'dev', { completedAt: new Date((t0 - 3 * day) * 1000).toISOString() }),
+      card('d2', 'done', 'dev', { completedAt: new Date((t0 - 1 * day) * 1000).toISOString() }),
+      card('d3', 'done', 'dev', { completedAt: new Date((t0 - 5 * day) * 1000).toISOString() }),
+      card('d4', 'done', 'dev', { completedAt: new Date((t0 - 9 * day) * 1000).toISOString() }),
+      card('arc', 'archived'),
+      card('other', 'blocked', 'someone-else'),
+    ]
+    const det = (reason: string | undefined, kind: string | undefined, ageDays: number, summary?: string) =>
+      ({ events: [{ kind: 'created', created_at: t0 - 9 * day }, { kind: 'blocked', created_at: t0 - ageDays * day, payload: { reason, kind } }], comments: [], latestSummary: summary ?? null, lastFailureError: null, children: [] }) as never
+    const details = new Map<string, never>([
+      ['new', det('Cần anh chọn A hay B', 'needs_input', 1)],
+      ['old', det('Chờ key sandbox', 'needs_input', 4)],
+      ['dep', det('Superseded by x', 'dependency', 3)],
+      ['d2', { events: [], comments: [], latestSummary: 'Đã xong API', lastFailureError: null, children: [] } as never],
+    ])
+    const feed = [
+      { id: 1, kind: 'done', agent: 'dev', read: false },
+      { id: 2, kind: 'done', agent: 'dev', read: true },
+      { id: 3, kind: 'assigned', agent: 'dev', read: false },
+      { id: 4, kind: 'blocked', agent: 'other-agent', read: false },
+    ] as never
+    const b = buildBrief({ name: 'dev', tasks, details, feed })
+    const ids = b.cards.map((c) => c.id).join()
+    if (ids !== 'old,dep,new,rev,run,q1,tri') problems.push(`card order ${ids}, want old,dep,new,rev,run,q1,tri (blocked oldest wait first, then review, running, queue)`)
+    const old = b.cards.find((c) => c.id === 'old')!
+    if (old.reason !== 'Chờ key sandbox' || old.kind !== 'needs_input' || !old.blockedAt) problems.push(`blocked card lost its reason/kind: ${JSON.stringify(old)}`)
+    if (b.cards.find((c) => c.id === 'dep')?.kind !== 'dependency') problems.push('dependency kind not carried')
+    if (b.cards.some((c) => c.id === 'other' || c.id === 'arc' || c.status === 'done')) problems.push('brief must hold only this agent\'s open, live cards')
+    if (b.recentDone.map((d) => d.id).join() !== 'd2,d1,d3') problems.push(`recentDone ${b.recentDone.map((d) => d.id).join()}, want newest three d2,d1,d3`)
+    if (b.recentDone[0].summary !== 'Đã xong API') problems.push('recent done must carry the completion summary')
+    if (b.reports.map((r) => r.id).join() !== '1') problems.push(`reports ${b.reports.map((r) => r.id).join()}, want only the unread done/blocked of this agent`)
+    // a blocked card whose detail could not be read still shows, without a reason
+    const lone = buildBrief({ name: 'dev', tasks: [card('x', 'blocked')], details: new Map(), feed: [] })
+    if (lone.cards.length !== 1 || lone.cards[0].reason !== undefined || lone.cards[0].kind !== 'other') problems.push('unreadable detail must degrade to a reason-less blocked card')
+    const want = detailIds('dev', tasks).map((w) => w.id)
+    for (const need of ['new', 'old', 'dep', 'rev', 'd2', 'd1']) if (!want.includes(need)) problems.push(`detailIds missing ${need}`)
+    if (want.includes('d3') || want.includes('q1')) problems.push('detailIds must not read the queue or older done cards')
+
+    // swr with a version: a write (version bump) must never be answered with the stale value,
+    // nor by a refresh that started before it
+    let ver = 0
+    let n = 0
+    const slow = swr(async () => { const mine = ++n; await new Promise((r) => setTimeout(r, 30)); return mine }, { freshMs: 10_000, maxStaleMs: 60_000, version: () => ver })
+    const first = await slow()
+    ver += 1 // a write happens
+    const pending = slow() // must start a NEW refresh, not reuse/serve the old
+    const after = await pending
+    if (first !== 1 || after !== 2) problems.push(`swr version: first=${first} after-write=${after}, want 1 then 2`)
+    // an in-flight refresh that began before the write must not be shared with a caller after it
+    let ver2 = 0
+    let m = 0
+    const gated = swr(async () => { const mine = ++m; await new Promise((r) => setTimeout(r, 40)); return mine }, { freshMs: 10_000, maxStaleMs: 60_000, version: () => ver2 })
+    const early = gated()
+    ver2 += 1
+    const late = gated()
+    const [e, l] = await Promise.all([early, late])
+    if (e !== 1 || l !== 2) problems.push(`swr must not share a pre-write refresh: early=${e} late=${l}`)
+    check('agent journey: blocked cards with reason (oldest wait first), reports, recent work; swr drops answers older than a write', problems.length === 0, problems.join(' | '))
   }
 
   /* ------------------------------------------------------------- result -- */

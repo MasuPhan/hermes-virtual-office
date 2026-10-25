@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { listAgents, listAssignees, listBoards, listProfiles, listTasks, profileModel } from '@/lib/hermes/kanban'
+import { listAgents, listAssignees, listBoards, listProfiles, listTasks, profileModel, readGeneration } from '@/lib/hermes/kanban'
 import { blockedAssigneesFor } from '@/lib/hermes/approvals'
 import { hiddenNames } from '@/lib/hermes/office-membership'
 import { assertApiRequest } from '@/lib/api-policy'
@@ -40,7 +40,9 @@ const readTeam = swr(
     })
     return { ...team, readAt: new Date().toISOString() }
   },
-  { freshMs: TTL_MS, maxStaleMs: MAX_STALE_MS },
+  // A write (answer, unblock, assign) throws the stored answer away: the roster must not keep
+  // counting a card the operator has just unblocked.
+  { freshMs: TTL_MS, maxStaleMs: MAX_STALE_MS, version: readGeneration },
 )
 
 export async function GET(req: NextRequest) {
