@@ -12,29 +12,39 @@
  *
  * Concurrent callers share the one refresh. A failed background refresh is dropped: the stale
  * answer keeps being served until `maxStaleMs`, after which the error surfaces.
+ *
+ * `version` (optional) names the state the answer was computed from. When it has changed (a
+ * write happened), the stored answer is NOT served stale: the caller waits for a fresh one, so
+ * an action the operator just took is never hidden behind an old answer.
  */
 export function swr<T>(
   compute: () => Promise<T>,
-  opts: { freshMs: number; maxStaleMs: number },
+  opts: { freshMs: number; maxStaleMs: number; version?: () => unknown },
 ): () => Promise<T> {
-  let cur: { value: T; at: number } | null = null
-  let running: Promise<T> | null = null
+  let cur: { value: T; at: number; ver: unknown } | null = null
+  let running: { p: Promise<T>; ver: unknown } | null = null
+  let latest = 0
 
   const refresh = (): Promise<T> => {
-    if (!running) {
-      running = compute()
-        .then((value) => {
-          cur = { value, at: Date.now() }
-          return value
-        })
-        .finally(() => {
-          running = null
-        })
-    }
-    return running
+    const ver = opts.version?.()
+    // A refresh that STARTED before a write answers for the old state: never share it.
+    if (running && running.ver === ver) return running.p
+    const mine = ++latest
+    const p = compute()
+      .then((value) => {
+        // An older refresh finishing after a newer one must not overwrite it.
+        if (mine === latest) cur = { value, at: Date.now(), ver }
+        return value
+      })
+      .finally(() => {
+        if (running?.p === p) running = null
+      })
+    running = { p, ver }
+    return p
   }
 
   return async () => {
+    if (cur && opts.version && cur.ver !== opts.version()) cur = null
     const age = cur ? Date.now() - cur.at : Infinity
     if (cur && age < opts.freshMs) return cur.value
     if (cur && age < opts.maxStaleMs) {

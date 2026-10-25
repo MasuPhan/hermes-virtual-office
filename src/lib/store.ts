@@ -5,6 +5,7 @@ import type { Agent, ArchivedMeeting, Meeting, Task } from '@/types/hermes'
 import type { AvatarDisplay, AvatarState } from './office/types'
 import type { Health } from './office/health'
 import type { CronPulse, WorkSignals, A2aPair } from './office/duty'
+import type { TeamMember } from './hermes/team'
 import { fetchJson, setApiBoard } from './api'
 import { t as translate } from './i18n'
 import { readUrlState, storeBoard, storedBoard, urlView, writeUrlParam } from './kanban-url'
@@ -71,6 +72,9 @@ type State = {
    * Scene membacanya untuk mengirim agent ke mejanya (lihat office/duty.ts).
    */
   work: WorkSignals
+  /** Mỗi agent kèm việc trên MỌI board (từ /api/hermes/team): nguồn chung của overlay và panel agent. */
+  team: TeamMember[]
+  loadTeam: () => Promise<void>
   /** Báo cáo chưa đọc ở Phòng chung (xong / bị chặn). */
   feedUnread: number
   /** Áp kết quả `/api/hermes/feed` (sau khi đánh dấu đã đọc) mà không chờ vòng poll sau. */
@@ -134,6 +138,11 @@ export const useOffice = create<State>((set, get) => ({
 
   work: { chatLive: [], cron: null, a2a: [], reporting: [] },
   feedUnread: 0,
+  team: [],
+  async loadTeam() {
+    const res = await fetchJson<{ members: TeamMember[] }>('/api/hermes/team', { cache: 'no-store' })
+    if (res.ok && res.data) set({ team: res.data.members })
+  },
   setFeedSummary: ({ unread, reporting }) => set((st) => ({ feedUnread: unread, work: { ...st.work, reporting } })),
 
   async loadWork() {

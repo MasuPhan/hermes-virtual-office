@@ -50,13 +50,14 @@ BOARDS = [
 ]
 
 
-def task(tid, title, assignee, status, created_by, age_h, parents=(), archived=False, done_h=None):
+def task(tid, title, assignee, status, created_by, age_h, parents=(), archived=False, done_h=None, events=()):
     return {
         'id': tid, 'title': title, 'assignee': assignee, 'status': 'archived' if archived else status,
         'created_by': created_by, 'priority': 0, 'body': 'Fixture task (fake Hermes).',
         'created_at': NOW - int(age_h * H), 'started_at': NOW - int(age_h * H) + 60,
         'completed_at': NOW - int(done_h * H) if done_h is not None else None,
         '_parents': list(parents),
+        '_events': list(events),
     }
 
 
@@ -65,7 +66,19 @@ TASKS = {
         task('t_root01', 'Ra mắt tính năng thanh toán', 'default', 'todo', 'user', 30, parents=('t_dev01', 't_qa01')),
         task('t_dev01', 'Viết API thanh toán', 'developer', 'running', 'default', 20),
         task('t_qa01', 'Kiểm thử luồng thanh toán', 'qa-engineer', 'todo', 'default', 20, parents=('t_dev01',)),
-        task('t_ops01', 'Dựng pipeline deploy', 'devops', 'blocked', 'default', 26),
+        task('t_ops01', 'OPS: HTTPS cho MinIO Console qua Tailscale', 'devops', 'blocked', 'default', 100, events=[
+            {'kind': 'blocked', 'created_at': NOW - 98 * H, 'run_id': None, 'payload': {
+                'kind': 'needs_input', 'source_status': 'ready', 'recurrences': 1,
+                'reason': 'Cần anh chọn cách làm chứng chỉ cho MinIO Console riêng tư: cài Caddy internal CA trên từng máy client, '
+                          'hoặc dùng hostname Tailscale tin cậy thay cho s3-console.example.com. Chưa đổi route nào.'}}]),
+        task('t_ops03', 'Kiểm tra lại HSTS cho staging', 'devops', 'blocked', 'default', 90, events=[
+            {'kind': 'blocked', 'created_at': NOW - 88 * H, 'run_id': None, 'payload': {
+                'kind': 'dependency', 'reason': 'Superseded by t_ops02, which is done. Do not retry this card.'}}]),
+        task('t_dev03', 'DEV-05B: WebP cho ảnh upload blog mới', 'developer', 'blocked', 'default', 100, events=[
+            {'kind': 'blocked', 'created_at': NOW - 99 * H, 'run_id': None, 'payload': {
+                'kind': 'needs_input', 'source_status': 'ready', 'recurrences': 1,
+                'reason': 'Cần xác định điểm vào chính thức cho upload blog (NocoBase attachment, publisher bên ngoài hay CLI mới) '
+                          'và một fixture test ghi được để kiểm tra đầu cuối.'}}]),
         task('t_ops02', 'Cập nhật chứng chỉ SSL', 'devops', 'done', 'devops', 50, done_h=40),
         task('t_dev02', 'Sửa lỗi đăng nhập', 'developer', 'done', 'user', 72, done_h=60),
         task('t_tri01', 'Ý tưởng: bảng giá mới', None, 'triage', 'user', 5),
@@ -179,10 +192,13 @@ def kanban(args):
             return 1
         events = [{'kind': 'created', 'created_at': t['created_at'], 'run_id': None,
                    'payload': {'assignee': t['assignee'], 'parents': t['_parents']}}]
+        events += t.get('_events', [])
         events += STATE['events'].get(f"{board}:{t['id']}", [])
+        comments = [{'author': e['payload'].get('author', 'user'), 'body': e['payload'].get('body', ''), 'created_at': e['created_at']}
+                    for e in events if e['kind'] == 'commented']
         summary = next((e['payload'].get('summary') for e in reversed(events) if e['kind'] == 'completed'), None)
         out({'task': public(t), 'parents': t['_parents'], 'children': children_of(board, t['id']),
-             'comments': [], 'events': events, 'runs': [], 'latest_summary': summary})
+             'comments': comments, 'events': events, 'runs': [], 'latest_summary': summary})
     elif verb == 'assignees':
         names = sorted(set(PROFILES) | {t['assignee'] for t in rows if t['assignee']})
         res = []
@@ -197,6 +213,23 @@ def kanban(args):
         out([])
     elif verb in ('log', 'stats'):
         print('')
+    elif verb in ('comment', 'promote', 'unblock') and state_path():
+        key = f'{board}:{args[1]}'
+        if not any(t['id'] == args[1] for t in rows):
+            print(f'task {args[1]} not found', file=sys.stderr)
+            return 1
+        ev = STATE['events'].setdefault(key, [])
+        if verb == 'comment':
+            ev.append({'kind': 'commented', 'created_at': int(time.time()), 'run_id': None,
+                       'payload': {'author': 'user', 'body': ' '.join(args[2:])}})
+        else:
+            reason = args[args.index('--reason') + 1] if '--reason' in args else ' '.join(args[2:])
+            STATE['status'][key] = 'ready'
+            ev.append({'kind': 'unblocked' if verb == 'unblock' else 'promoted', 'created_at': int(time.time()),
+                       'run_id': None, 'payload': {'reason': reason}})
+        save_state(STATE)
+        log('WRITE_FAKE kanban --board %s %s %s' % (board, verb, args[1]))
+        print(f'{verb} {args[1]} ok')
     elif verb == 'create' and state_path():
         opts = {'--assignee': None, '--body': '', '--created-by': 'user', '--priority': '0'}
         i, title = 1, None

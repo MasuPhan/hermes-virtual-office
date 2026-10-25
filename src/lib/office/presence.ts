@@ -1,4 +1,4 @@
-import type { Agent, Meeting } from '@/types/hermes'
+import type { Agent, AgentStatus, Meeting } from '@/types/hermes'
 
 /**
  * "Who is doing what right now", one line per agent, for the roster overlay on the 3D view.
@@ -30,6 +30,8 @@ export type PresenceRow = {
   topic?: string
   /** Blocked cards it holds, when known. */
   blockedCards?: number
+  /** idle: cards waiting in its queue (ready / todo / scheduled), when known. */
+  queued?: number
 }
 
 export type PresenceInput = {
@@ -40,6 +42,8 @@ export type PresenceInput = {
   reporting: string[]
   /** Blocked cards per agent, over every board (from /api/hermes/team). */
   blockedCards?: Record<string, number>
+  /** Cards waiting in each agent's queue, over every board (from /api/hermes/team). */
+  queuedCards?: Record<string, number>
 }
 
 /** Lower comes first in the list: what needs the operator, then who is working together, then work, then rest. */
@@ -74,10 +78,30 @@ export function presenceRows(i: PresenceInput): PresenceRow[] {
     if (a.status === 'blocked' || blockedCards > 0) {
       return { name: a.name, kind: 'blocked', ...(blockedCards > 0 ? { blockedCards } : {}) }
     }
-    return { name: a.name, kind: 'idle' }
+    const queued = i.queuedCards?.[a.name] ?? 0
+    return { name: a.name, kind: 'idle', ...(queued > 0 ? { queued } : {}) }
   })
 
   return rows.sort((x, y) => RANK[x.kind] - RANK[y.kind] || x.name.localeCompare(y.name))
+}
+
+/** The dot on a portrait: reuses the status colours of the rest of the office. */
+export function presenceDot(kind: PresenceKind): AgentStatus {
+  switch (kind) {
+    case 'meeting':
+    case 'talking':
+      return 'meeting'
+    case 'working':
+    case 'chat':
+      return 'working'
+    case 'reporting':
+    case 'review':
+      return 'review'
+    case 'blocked':
+      return 'blocked'
+    default:
+      return 'idle'
+  }
 }
 
 export type PresenceGroup = 'waiting' | 'together' | 'working' | 'idle'
