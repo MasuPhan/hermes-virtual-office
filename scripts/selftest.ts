@@ -6334,6 +6334,53 @@ void (async () => {
     check('stray bots + slow reads: rows without a live agent are never drawn; stale-while-revalidate serves old answers instantly', problems.length === 0, problems.join(' | '))
   }
 
+  /* ------------------------------------------------------ status overlay -- */
+  {
+    // One line per agent for the overlay. The order of the rules mirrors dutyOf: a meeting beats a
+    // call beats desk work; what needs the operator sorts first; idle sorts last.
+    const problems: string[] = []
+    const { presenceRows, presenceSummary } = await import('../src/lib/office/presence')
+    const ag = (name: string, status: string, currentTaskTitle?: string) => ({ name, status, currentTaskTitle }) as never
+    const rows = presenceRows({
+      agents: [
+        ag('idle1', 'idle'),
+        ag('dev', 'working', 'Viết API'),
+        ag('caller', 'working', 'Việc khác'), // working AND on a call → the call wins
+        ag('callee', 'idle'),
+        ag('mtg', 'idle'),
+        ag('rev', 'review', 'Bài blog'),
+        ag('holder', 'idle'), // idle but holds two blocked cards
+        ag('rep', 'idle'),
+        ag('chatty', 'idle'),
+        ag('busyrep', 'working', 'Đang chạy'), // working AND has an unread report → working
+      ],
+      meeting: { state: 'running', topic: 'Kế hoạch quý', participants: ['mtg'] } as never,
+      a2a: [{ agent: 'caller', peer: 'callee' }, { agent: 'callee', peer: 'caller' }],
+      chatLive: ['chatty'],
+      reporting: ['rep', 'busyrep'],
+      blockedCards: { holder: 2, dev: 1 },
+    })
+    const kind = (n: string) => rows.find((r) => r.name === n)?.kind
+    const want: Record<string, string> = { idle1: 'idle', dev: 'working', caller: 'talking', callee: 'talking', mtg: 'meeting', rev: 'review', holder: 'blocked', rep: 'reporting', chatty: 'chat', busyrep: 'working' }
+    for (const [n, k] of Object.entries(want)) if (kind(n) !== k) problems.push(`${n}: ${kind(n)}, want ${k}`)
+    if (rows.find((r) => r.name === 'caller')?.peer !== 'callee') problems.push('a call must name the other side')
+    if (rows.find((r) => r.name === 'dev')?.task !== 'Viết API') problems.push('working must carry the card title')
+    if (rows.find((r) => r.name === 'holder')?.blockedCards !== 2) problems.push('blocked must carry the card count')
+    if (rows.find((r) => r.name === 'mtg')?.topic !== 'Kế hoạch quý') problems.push('a meeting must carry its topic')
+    const order = rows.map((r) => r.kind)
+    const rank = ['blocked', 'reporting', 'review', 'meeting', 'talking', 'working', 'chat', 'idle']
+    if (order.some((k, i) => i && rank.indexOf(order[i - 1]) > rank.indexOf(k))) problems.push(`rows not ordered by need: ${order.join()}`)
+    if (rows[0].kind !== 'blocked' || rows[rows.length - 1].kind !== 'idle') problems.push('what needs the operator must come first and idle last')
+    const sum = presenceSummary(rows)
+    if (sum.waiting !== 3 || sum.together !== 3 || sum.working !== 3 || sum.idle !== 1) problems.push(`summary ${JSON.stringify(sum)}, want 3/3/3/1`)
+    // a finished or queued-but-not-live meeting must not claim anyone
+    const over = presenceRows({ agents: [ag('a', 'idle')], meeting: { state: 'done', topic: 't', participants: ['a'] } as never, a2a: [], chatLive: [], reporting: [] })
+    if (over[0].kind !== 'idle') problems.push('a finished meeting must not hold its participants')
+    // an approval-blocked agent with no card count still reads blocked
+    if (presenceRows({ agents: [ag('b', 'blocked')], meeting: null, a2a: [], chatLive: [], reporting: [] })[0].kind !== 'blocked') problems.push('status blocked must read blocked')
+    check('status overlay: one line per agent — call/meeting/work/needs-you/idle, ordered by what needs the operator', problems.length === 0, problems.join(' | '))
+  }
+
   /* ------------------------------------------------------------- result -- */
   console.log(`\n${checks - failures}/${checks} checks passed\n`)
   if (failures) {

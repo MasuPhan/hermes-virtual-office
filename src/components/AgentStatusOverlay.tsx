@@ -1,0 +1,171 @@
+'use client'
+
+import { useEffect, useMemo, useState } from 'react'
+import AgentAvatar from './AgentAvatar'
+import { fetchJson } from '@/lib/api'
+import { useOffice } from '@/lib/store'
+import { t as translate } from '@/lib/i18n'
+import { presenceRows, presenceSummary, type PresenceKind, type PresenceRow } from '@/lib/office/presence'
+import type { TeamMember } from '@/lib/hermes/team'
+import type { AgentStatus } from '@/types/hermes'
+
+const STORE_KEY = 'hvo.roster.collapsed'
+/** /api/hermes/team answers from a stale-while-revalidate cache, so this is cheap. */
+const TEAM_POLL_MS = 15_000
+
+/** What the dot on the portrait shows, reusing the status colours of the rest of the office. */
+const DOT: Record<PresenceKind, AgentStatus> = {
+  meeting: 'meeting',
+  talking: 'meeting',
+  working: 'working',
+  chat: 'working',
+  reporting: 'review',
+  review: 'review',
+  blocked: 'blocked',
+  idle: 'idle',
+}
+
+function describe(r: PresenceRow): string {
+  switch (r.kind) {
+    case 'meeting':
+      return translate('Roster.meeting', { topic: r.topic || '…' })
+    case 'talking':
+      return r.peer ? translate('Roster.talking', { peer: r.peer }) : translate('Roster.talkingUnknown')
+    case 'working':
+      return r.task ? translate('Roster.working', { task: r.task }) : translate('Roster.workingNoTask')
+    case 'chat':
+      return translate('Roster.chat')
+    case 'reporting':
+      return translate('Roster.reporting')
+    case 'review':
+      return r.task ? translate('Roster.review', { task: r.task }) : translate('Roster.reviewNoTask')
+    case 'blocked':
+      return r.blockedCards ? translate('Roster.blocked', { n: r.blockedCards }) : translate('Roster.blockedNoCount')
+    default:
+      return translate('Roster.idle')
+  }
+}
+
+/**
+ * Who is doing what, at a glance, over the 3D / pixel view — so the operator reads the state
+ * of the whole team without clicking an avatar. One line per agent, the ones that need the
+ * operator first. Collapses to the four counts; the choice is remembered per browser.
+ */
+export default function AgentStatusOverlay() {
+  const agents = useOffice((s) => s.agents)
+  const meeting = useOffice((s) => s.meeting)
+  const work = useOffice((s) => s.work)
+  const select = useOffice((s) => s.select)
+  const selected = useOffice((s) => s.selectedAgent)
+
+  // null until mounted: the stored choice and the screen width are only known in the browser.
+  const [collapsed, setCollapsed] = useState<boolean | null>(null)
+  const [team, setTeam] = useState<TeamMember[]>([])
+
+  useEffect(() => {
+    let stored: string | null = null
+    try {
+      stored = localStorage.getItem(STORE_KEY)
+    } catch {
+      // storage blocked: fall back to the default below
+    }
+    setCollapsed(stored === null ? window.innerWidth < 720 : stored === '1')
+  }, [])
+
+  useEffect(() => {
+    let alive = true
+    const load = async () => {
+      const res = await fetchJson<{ members: TeamMember[] }>('/api/hermes/team', { cache: 'no-store' })
+      if (alive && res.ok && res.data) setTeam(res.data.members)
+    }
+    void load()
+    const id = setInterval(() => void load(), TEAM_POLL_MS)
+    return () => {
+      alive = false
+      clearInterval(id)
+    }
+  }, [])
+
+  const roles = useMemo(() => new Map(agents.map((a) => [a.name, a.role])), [agents])
+  const rows = useMemo(
+    () =>
+      presenceRows({
+        agents,
+        meeting,
+        a2a: work.a2a ?? [],
+        chatLive: work.chatLive ?? [],
+        reporting: work.reporting ?? [],
+        blockedCards: Object.fromEntries(team.map((m) => [m.name, m.counts.blocked ?? 0])),
+      }),
+    [agents, meeting, work, team],
+  )
+  const sum = presenceSummary(rows)
+
+  if (collapsed === null) return null
+
+  const toggle = () => {
+    const next = !collapsed
+    setCollapsed(next)
+    try {
+      localStorage.setItem(STORE_KEY, next ? '1' : '0')
+    } catch {
+      // per-browser convenience only
+    }
+  }
+
+  const chips: { key: string; n: number; label: string }[] = [
+    { key: 'waiting', n: sum.waiting, label: translate('Roster.sumWaiting', { n: sum.waiting }) },
+    { key: 'together', n: sum.together, label: translate('Roster.sumTogether', { n: sum.together }) },
+    { key: 'working', n: sum.working, label: translate('Roster.sumWorking', { n: sum.working }) },
+    { key: 'idle', n: sum.idle, label: translate('Roster.sumIdle', { n: sum.idle }) },
+  ]
+
+  return (
+    <aside className="vp-roster" aria-label={translate('Roster.title')}>
+      <button
+        type="button"
+        className="vp-roster-head"
+        onClick={toggle}
+        aria-expanded={!collapsed}
+        title={collapsed ? translate('Roster.expand') : translate('Roster.collapse')}
+      >
+        <b>{translate('Roster.title')}</b>
+        <span className="vp-roster-chips">
+          {chips
+            .filter((c) => c.n > 0)
+            .map((c) => (
+              <span key={c.key} className="vp-roster-chip" data-k={c.key}>
+                {c.label}
+              </span>
+            ))}
+        </span>
+        <span className="vp-roster-caret" aria-hidden="true">{collapsed ? '▸' : '▾'}</span>
+      </button>
+      {!collapsed && (
+        <ul className="vp-roster-list">
+          {rows.length === 0 && <li className="vp-muted vp-roster-empty">{translate('Roster.empty')}</li>}
+          {rows.map((r) => {
+            const text = describe(r)
+            return (
+              <li key={r.name}>
+                <button
+                  type="button"
+                  className={`vp-roster-row${selected === r.name ? ' on' : ''}`}
+                  data-kind={r.kind}
+                  onClick={() => select(r.name)}
+                  title={`${r.name} — ${text}`}
+                >
+                  <AgentAvatar name={r.name} role={roles.get(r.name) ?? null} status={DOT[r.kind]} size={30} />
+                  <span className="vp-roster-txt">
+                    <b>{r.name}</b>
+                    <span>{text}</span>
+                  </span>
+                </button>
+              </li>
+            )
+          })}
+        </ul>
+      )}
+    </aside>
+  )
+}
