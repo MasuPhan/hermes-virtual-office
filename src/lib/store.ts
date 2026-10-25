@@ -6,6 +6,7 @@ import type { AvatarDisplay, AvatarState } from './office/types'
 import type { Health } from './office/health'
 import type { CronPulse, WorkSignals, A2aPair } from './office/duty'
 import type { TeamMember } from './hermes/team'
+import type { AgentBrief } from './hermes/agent-brief'
 import { fetchJson, setApiBoard } from './api'
 import { t as translate } from './i18n'
 import { readUrlState, storeBoard, storedBoard, urlView, writeUrlParam } from './kanban-url'
@@ -25,6 +26,9 @@ export type BoardInfo = {
 let displayRevision = 0
 
 const POLL_MS = Number(process.env.NEXT_PUBLIC_POLL_MS || 4000)
+const BRIEF_FRESH_MS = 6_000
+/** Reads of an agent's brief in flight, so a hover and a click share one request. */
+const briefInflight = new Map<string, Promise<string | null>>()
 
 type State = {
   /** Hermes board on screen ('' until known = server default). */
@@ -75,6 +79,15 @@ type State = {
   /** Mỗi agent kèm việc trên MỌI board (từ /api/hermes/team): nguồn chung của overlay và panel agent. */
   team: TeamMember[]
   loadTeam: () => Promise<void>
+  /**
+   * Tóm tắt từng agent (/api/hermes/team/<tên>) đã đọc. Panel agent hiện bản đã có NGAY khi mở
+   * rồi mới đọc lại, và roster đọc trước khi rê chuột / cho agent đang chờ anh: bấm là thấy.
+   */
+  briefs: Record<string, { at: number; brief: AgentBrief }>
+  /** Đọc tóm tắt; bỏ qua nếu bản đang có dưới 6 s (trừ khi `force`). Trả lỗi hiển thị được, hoặc null. */
+  loadBrief: (name: string, force?: boolean) => Promise<string | null>
+  /** Sửa tóm tắt đã lưu ngay sau một thao tác thành công, trong lúc chờ đọc lại. */
+  patchBrief: (name: string, fn: (b: AgentBrief) => AgentBrief) => void
   /** Báo cáo chưa đọc ở Phòng chung (xong / bị chặn). */
   feedUnread: number
   /** Áp kết quả `/api/hermes/feed` (sau khi đánh dấu đã đọc) mà không chờ vòng poll sau. */
@@ -139,6 +152,29 @@ export const useOffice = create<State>((set, get) => ({
   work: { chatLive: [], cron: null, a2a: [], reporting: [] },
   feedUnread: 0,
   team: [],
+  briefs: {},
+  async loadBrief(name, force = false) {
+    const have = get().briefs[name]
+    if (!force && have && Date.now() - have.at < BRIEF_FRESH_MS) return null
+    const pending = briefInflight.get(name)
+    if (pending) return pending
+    const p = fetchJson<AgentBrief>(`/api/hermes/team/${encodeURIComponent(name)}`, { cache: 'no-store' })
+      .then((res) => {
+        if (res.ok && res.data) {
+          const brief = res.data
+          set((st) => ({ briefs: { ...st.briefs, [name]: { at: Date.now(), brief } } }))
+          return null
+        }
+        return res.error
+      })
+      .finally(() => briefInflight.delete(name))
+    briefInflight.set(name, p)
+    return p
+  },
+  patchBrief(name, fn) {
+    const have = get().briefs[name]
+    if (have) set((st) => ({ briefs: { ...st.briefs, [name]: { at: have.at, brief: fn(have.brief) } } }))
+  },
   async loadTeam() {
     const res = await fetchJson<{ members: TeamMember[] }>('/api/hermes/team', { cache: 'no-store' })
     if (res.ok && res.data) set({ team: res.data.members })

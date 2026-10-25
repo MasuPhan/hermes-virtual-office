@@ -17,6 +17,7 @@ import {
 const STORE_KEY = 'hvo.roster.collapsed'
 /** /api/hermes/team answers from a stale-while-revalidate cache, so this is cheap. */
 const TEAM_POLL_MS = 15_000
+const BRIEF_AHEAD_MS = 20_000
 
 export function describePresence(r: PresenceRow): string {
   switch (r.kind) {
@@ -47,6 +48,7 @@ export function describePresence(r: PresenceRow): string {
 export default function AgentStatusOverlay() {
   const agents = useOffice((s) => s.agents)
   const loadTeam = useOffice((s) => s.loadTeam)
+  const loadBrief = useOffice((s) => s.loadBrief)
   const select = useOffice((s) => s.select)
   const selected = useOffice((s) => s.selectedAgent)
 
@@ -71,6 +73,23 @@ export default function AgentStatusOverlay() {
 
   const roles = useMemo(() => new Map(agents.map((a) => [a.name, a.role])), [agents])
   const rows = usePresence()
+
+  // Read ahead the agents that wait on the operator (the ones a click is most likely to go to),
+  // so the panel opens on data already in hand. The server answers from warm caches, so this
+  // costs almost nothing; it repeats while they stay in that list.
+  const waitingKey = rows
+    .filter((r) => presenceGroup(r.kind) === 'waiting')
+    .slice(0, 4)
+    .map((r) => r.name)
+    .join(',')
+  useEffect(() => {
+    if (!waitingKey) return
+    const names = waitingKey.split(',')
+    const run = () => names.forEach((n) => void loadBrief(n))
+    run()
+    const id = setInterval(run, BRIEF_AHEAD_MS)
+    return () => clearInterval(id)
+  }, [waitingKey, loadBrief])
   const sum = presenceSummary(rows)
 
   if (collapsed === null) return null
@@ -144,6 +163,8 @@ export default function AgentStatusOverlay() {
                           className="vp-roster-row"
                           data-sel={selected === r.name ? '1' : undefined}
                           onClick={() => select(r.name)}
+                          onPointerEnter={() => void loadBrief(r.name)}
+                          onFocus={() => void loadBrief(r.name)}
                           title={`${r.name} — ${text}`}
                         >
                           <AgentAvatar name={r.name} role={roles.get(r.name) ?? null} status={presenceDot(r.kind)} size={32} />

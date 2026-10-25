@@ -6462,6 +6462,15 @@ void (async () => {
     const late = gated()
     const [e, l] = await Promise.all([early, late])
     if (e !== 1 || l !== 2) problems.push(`swr must not share a pre-write refresh: early=${e} late=${l}`)
+    // Which `kanban` commands may be shared and cached, and which are writes that must empty the caches.
+    // `boards list` is a read of two words; filing it under writes emptied every cache every 15 s.
+    const { isReadCommand } = await import('../src/lib/hermes/kanban')
+    for (const r of [['list'], ['show', 't_1'], ['runs', 't_1'], ['log', 't_1'], ['assignees'], ['attachments', 't_1'], ['boards', 'list']]) {
+      if (!isReadCommand(r)) problems.push(`read command not recognised: ${r.join(' ')}`)
+    }
+    for (const w of [['create', 'x'], ['comment', 't_1', 'x'], ['promote', 't_1'], ['unblock', 't_1'], ['archive', 't_1'], ['archive', '--rm', 't_1'], ['boards', 'archive', 'b'], ['boards', 'create', 'b'], ['dispatch'], ['reclaim', 't_1']]) {
+      if (isReadCommand(w)) problems.push(`write treated as a read: ${w.join(' ')}`)
+    }
     check('agent journey: blocked cards with reason (oldest wait first), reports, recent work; swr drops answers older than a write', problems.length === 0, problems.join(' | '))
   }
 
