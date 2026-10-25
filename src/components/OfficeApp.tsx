@@ -14,6 +14,7 @@ import SystemPanel from './SystemPanel'
 import BoardPanel from './BoardPanel'
 import ChatPanel from './ChatPanel'
 import OfficeFeed from './OfficeFeed'
+import AgentStatusOverlay from './AgentStatusOverlay'
 import NewTaskDialog from './NewTaskDialog'
 import KanbanModal from './KanbanModal'
 import DummySpawnDialog from './DummySpawnDialog'
@@ -193,6 +194,9 @@ export default function OfficeApp() {
           <button className={view === 'sprite' ? 'on' : ''} onClick={() => setView('sprite')}>Điểm ảnh</button>
         </div>
       </header>
+
+      {/* ---------------------------------------------- team status, at a glance */}
+      {view !== '2d' && <AgentStatusOverlay />}
 
       {/* ------------------------------------------------------- agent card */}
       {selected && (() => {
