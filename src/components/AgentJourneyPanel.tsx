@@ -11,7 +11,7 @@ import { useOffice } from '@/lib/store'
 import { t as translate, type MessageKey } from '@/lib/i18n'
 import { parseAssign } from '@/lib/hermes/mention'
 import { presenceDot, presenceGroup } from '@/lib/office/presence'
-import type { AgentBrief, BriefCard } from '@/lib/hermes/agent-brief'
+import type { BriefCard } from '@/lib/hermes/agent-brief'
 
 const POLL_MS = 10_000
 const REASON_SHORT = 260
@@ -62,9 +62,11 @@ function Journey({ name }: { name: string }) {
   const loadTasks = useOffice((s) => s.load)
   const loadTeam = useOffice((s) => s.loadTeam)
   const setFeedSummary = useOffice((s) => s.setFeedSummary)
+  const brief = useOffice((s) => s.briefs[name]?.brief ?? null)
+  const loadBrief = useOffice((s) => s.loadBrief)
+  const patchBrief = useOffice((s) => s.patchBrief)
   const row = usePresence().find((r) => r.name === name)
 
-  const [brief, setBrief] = useState<AgentBrief | null>(null)
   const [err, setErr] = useState<string | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const [note, setNote] = useState<string | null>(null)
@@ -73,13 +75,10 @@ function Journey({ name }: { name: string }) {
   const [assignBoard, setAssignBoard] = useState('')
   const [confirming, setConfirming] = useState(false)
 
+  // What is already known shows at once (the roster reads it ahead); this only brings it up to date.
   const reload = useCallback(async () => {
-    const res = await fetchJson<AgentBrief>(`/api/hermes/team/${encodeURIComponent(name)}`, { cache: 'no-store' })
-    if (res.ok && res.data) {
-      setBrief(res.data)
-      setErr(null)
-    } else setErr(res.error)
-  }, [name])
+    setErr(await loadBrief(name, true))
+  }, [name, loadBrief])
 
   useEffect(() => {
     void reload()
@@ -132,6 +131,8 @@ function Journey({ name }: { name: string }) {
       const freed = await post(taskUrl(c), { action: 'promote', message: text.slice(0, 300) })
       if (!freed.ok) return translate('Journey.answeredCommentOnly', { msg: freed.error ?? '' })
       setDraft(c.id, '')
+      // Show the card in the queue at once; the re-read below confirms it.
+      patchBrief(name, (b) => ({ ...b, cards: b.cards.map((x) => (x.id === c.id ? { ...x, status: 'ready', reason: undefined } : x)) }))
       return translate('Journey.answered')
     })
 
@@ -140,6 +141,7 @@ function Journey({ name }: { name: string }) {
       if (!window.confirm(translate('Journey.archiveConfirm', { title: c.title }))) return null
       const res = await post(`/api/hermes/tasks/archive?board=${encodeURIComponent(c.board)}`, { action: 'archive', ids: [c.id] })
       if (!res.ok) throw new Error(res.error ?? 'archive')
+      patchBrief(name, (b) => ({ ...b, cards: b.cards.filter((x) => x.id !== c.id) }))
       return translate('Journey.archived')
     })
 
@@ -162,6 +164,7 @@ function Journey({ name }: { name: string }) {
       })
       if (!res.ok || !res.data) throw new Error(res.error ?? 'ack')
       setFeedSummary(res.data)
+      patchBrief(name, (b) => ({ ...b, reports: b.reports.filter((r) => !ids.includes(r.id)) }))
       return null
     })
 

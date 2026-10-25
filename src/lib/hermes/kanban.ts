@@ -22,6 +22,7 @@ import { readEvidence, splitEvidenceBatch, type EvidenceInput, type EvidenceMark
 import type { RunningCard, RunningReadout } from './restart-guard'
 import { readVerification, splitVerificationBatch, type VerificationMark, type VerificationReading, type VerifyEvent } from './verification'
 import { fleetRootEnv, resolveFleetRoot } from './root'
+import { swr } from '@/lib/swr'
 import { profileDir, validateAssigneeName, validateProfileName } from './profile-name'
 import { errorTail } from './redact'
 import { envBoard, scopedBoard, validateBoardSlug } from './board-scope'
@@ -73,6 +74,16 @@ const TIMEOUT_MS = Number(process.env.KANBAN_TIMEOUT_MS || 20_000)
  * push if the board ever grows past a few hundred tasks.
  */
 const READ_VERBS = new Set(['list', 'show', 'runs', 'log', 'assignees', 'attachments'])
+
+/**
+ * Does this `kanban` command only READ? A read is memoised and shared; anything else is a write
+ * and throws every memo away. `boards list` reads but is two words, so a check on the first
+ * word alone filed it under writes: every refresh of the board list (every 15 s) emptied all
+ * the caches, and anything built on them waited for a full re-read.
+ */
+export function isReadCommand(args: string[]): boolean {
+  return READ_VERBS.has(args[0]) || (args[0] === 'boards' && args[1] === 'list')
+}
 const READ_TTL_MS = 3000
 /** `config get model`: see `profileModel`. */
 const MODEL_TTL_MS = 60_000
@@ -85,6 +96,23 @@ const readCache = new Map<string, { at: number; out: string }>()
 const inflight = new Map<string, Promise<string>>()
 /** Bumped by every write: a read that STARTED before a write must not refill the cache after it. */
 let readGen = 0
+
+/**
+ * Every board's live cards in one list — the snapshot /team and /team/<name> both start from.
+ *
+ * Reading it cold is a chain of CLI rounds (`boards list`, then one `list` per board), seconds
+ * on a loaded machine. The roster's own poll keeps it warm, so a click on an agent finds it
+ * ready: fresh for 8 s, served stale for up to 2 min while one refresh runs, and thrown away
+ * by any write (see `swr`'s `version`).
+ */
+export const allBoardTasks: () => Promise<Task[]> = swr(
+  async () => {
+    const boards = await listBoards()
+    const lists = await Promise.all(boards.map((b) => listTasks({ board: b.slug }).catch(() => [] as Task[])))
+    return lists.flat()
+  },
+  { freshMs: 8_000, maxStaleMs: 120_000, version: () => readGen },
+)
 
 /** Changes with every write: lets a cache built on CLI reads tell that its answer is out of date. */
 export function readGeneration(): number {
@@ -147,10 +175,16 @@ export function effectiveBoard(board?: string | null): string {
 async function kanban(args: string[], board?: string | null): Promise<string> {
   const useBoard = effectiveBoard(board)
   const full = useBoard ? ['kanban', '--board', useBoard, ...args] : ['kanban', ...args]
-  if (READ_VERBS.has(args[0])) return sharedRead(full.join(' '), () => runKanban(full))
-  // A write invalidates every memo: the next read must see it.
+  if (isReadCommand(args)) return sharedRead(full.join(' '), () => runKanban(full))
+  // A write invalidates every memo: the next read must see it. Twice: before it (so nothing
+  // already stored is served) and after it (a read that STARTED while the write ran may have
+  // seen the old state and must not be kept).
   dropReads()
-  return runKanban(full)
+  try {
+    return await runKanban(full)
+  } finally {
+    dropReads()
+  }
 }
 
 async function runKanban(full: string[]): Promise<string> {
@@ -893,6 +927,8 @@ async function hermesWrite(args: string[]): Promise<string> {
   } catch (err) {
     const e = err as NodeJS.ErrnoException & { stderr?: string }
     throw new Error(`hermes ${args.join(' ')} thất bại: ${errorTail(e)}`)
+  } finally {
+    dropReads()
   }
 }
 
@@ -1681,6 +1717,9 @@ let boardsMemo: { at: number; data: BoardInfo[] } | null = null
 export function _resetBoardCachesForTest(): void {
   boardsMemo = null
   activeMemo = null
+  // The memoised CLI reads too: `boards list` used to empty them as a side effect of being filed
+  // under writes, and callers (the archive route, the tests) rely on a reset forgetting them.
+  dropReads()
 }
 
 /**

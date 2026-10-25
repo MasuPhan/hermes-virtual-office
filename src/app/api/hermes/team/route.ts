@@ -1,11 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { listAgents, listAssignees, listBoards, listProfiles, listTasks, profileModel, readGeneration } from '@/lib/hermes/kanban'
+import { allBoardTasks, listAgents, listAssignees, listBoards, listProfiles, profileModel, readGeneration } from '@/lib/hermes/kanban'
 import { blockedAssigneesFor } from '@/lib/hermes/approvals'
 import { hiddenNames } from '@/lib/hermes/office-membership'
 import { assertApiRequest } from '@/lib/api-policy'
 import { buildTeam, type Team } from '@/lib/hermes/team'
 import { swr } from '@/lib/swr'
-import type { Task } from '@/types/hermes'
 
 export const dynamic = 'force-dynamic'
 
@@ -22,9 +21,7 @@ const MAX_STALE_MS = 2 * 60_000
 
 const readTeam = swr(
   async (): Promise<Team & { readAt: string }> => {
-    const [boards, profiles, assignees] = await Promise.all([listBoards(), listProfiles(), listAssignees()])
-    const perBoard = await Promise.all(boards.map((b) => listTasks({ board: b.slug }).catch(() => [] as Task[])))
-    const tasks = perBoard.flat()
+    const [boards, profiles, assignees, tasks] = await Promise.all([listBoards(), listProfiles(), listAssignees(), allBoardTasks()])
     const busy = tasks.filter((t) => t.status === 'running' || t.status === 'review')
     const [agents, models] = await Promise.all([
       blockedAssigneesFor(busy).then((blocked) => listAgents(busy, assignees, blocked)),
