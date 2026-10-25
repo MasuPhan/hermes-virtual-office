@@ -89,6 +89,8 @@ export default function TaskPanel() {
   const archiveTasks = useOffice((s) => s.archiveTasks)
   const deleteTasks = useOffice((s) => s.deleteTasks)
   const [manageConfirm, setManageConfirm] = useState<'archive' | 'delete' | null>(null)
+  // Asked in the panel, not with window.confirm (refused in the embedded browser pane).
+  const [unblockAsk, setUnblockAsk] = useState(false)
   const [manageBusy, setManageBusy] = useState(false)
   const [manageErr, setManageErr] = useState<string | null>(null)
   const tasks = useOffice((s) => s.tasks)
@@ -349,16 +351,30 @@ export default function TaskPanel() {
               >
                 {translate('Kanban.runDisabled')}
               </button>
-              {blocked && (
-                <button
-                  className="vp-btn"
-                  disabled={busy}
-                  onClick={() => {
-                    if (window.confirm(translate('Kanban.unblockConfirm', { title: task.title }))) void act('promote')
-                  }}
-                >
+              {blocked && !unblockAsk && (
+                <button className="vp-btn" disabled={busy} onClick={() => setUnblockAsk(true)}>
                   {busy ? '…' : translate('Kanban.unblock')}
                 </button>
+              )}
+              {blocked && unblockAsk && (
+                <div className="vp-j-confirm" style={{ width: '100%' }}>
+                  <p>{translate('Kanban.unblockConfirm', { title: task.title })}</p>
+                  <div className="vp-j-actions">
+                    <button
+                      className="vp-btn"
+                      disabled={busy}
+                      onClick={() => {
+                        setUnblockAsk(false)
+                        void act('promote')
+                      }}
+                    >
+                      {busy ? '…' : translate('Kanban.unblockYes')}
+                    </button>
+                    <button className="vp-btn vp-btn-ghost" onClick={() => setUnblockAsk(false)}>
+                      {translate('Journey.cancel')}
+                    </button>
+                  </div>
+                </div>
               )}
             </div>
             <div id="vp-run-why" className="vp-muted">{translate('Kanban.runDisabledWhy')}</div>

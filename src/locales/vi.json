@@ -782,7 +782,6 @@
   "Journey.answerLabel": "Câu trả lời của anh cho {{name}}",
   "Journey.answerPlaceholder": "Anh trả lời hoặc quyết định ở đây. Nội dung được ghi vào thẻ để agent đọc khi chạy lại.",
   "Journey.answerSend": "Trả lời & gỡ chặn",
-  "Journey.answerConfirm": "Ghi câu trả lời vào thẻ và gỡ chặn \"{{title}}\"? Hermes sẽ cho agent chạy lại khi gateway hoạt động.",
   "Journey.answered": "Đã ghi câu trả lời và gỡ chặn.",
   "Journey.answeredCommentOnly": "Đã ghi câu trả lời nhưng chưa gỡ chặn được: {{msg}}",
   "Journey.openCard": "Mở thẻ",
@@ -818,5 +817,16 @@
   "Journey.status.todo": "Cần làm",
   "Journey.status.scheduled": "Đã lên lịch",
   "Journey.status.triage": "Chờ phân tích",
-  "Roster.idleQueued": "Rảnh · {{n}} việc đang chờ"
+  "Roster.idleQueued": "Rảnh · {{n}} việc đang chờ",
+  "Journey.answerNeeded": "Hãy nhập câu trả lời trước. Nếu không cần trả lời, dùng \"Gỡ chặn, không trả lời\".",
+  "Journey.unblockFree": "Gỡ chặn, không trả lời",
+  "Journey.unblockFreeConfirm": "Gỡ chặn \"{{title}}\" mà không trả lời? Agent sẽ chạy lại với thông tin hiện có.",
+  "Journey.unblockYes": "Xác nhận gỡ chặn",
+  "Journey.unblockedFree": "Đã gỡ chặn.",
+  "Journey.unblockedNote": "Gỡ chặn từ văn phòng, không kèm câu trả lời.",
+  "Journey.archiveYes": "Xác nhận lưu trữ",
+  "Journey.cancel": "Hủy",
+  "Kanban.unblockYes": "Xác nhận gỡ chặn",
+  "Journey.actionFailed": "Thao tác không thành: {{msg}}",
+  "Journey.archiveRefused": "Hermes không lưu trữ được thẻ này (thẻ đang chạy hoặc đã thay đổi)."
 }

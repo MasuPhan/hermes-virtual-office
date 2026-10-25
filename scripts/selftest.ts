@@ -6474,6 +6474,30 @@ void (async () => {
     check('agent journey: blocked cards with reason (oldest wait first), reports, recent work; swr drops answers older than a write', problems.length === 0, problems.join(' | '))
   }
 
+  /* ------------------------------------------------------ native dialogs -- */
+  {
+    // The embedded browser pane (and some other embeds) refuses window.confirm/alert/prompt and
+    // answers at once with "cancel": a handler that asks that way silently does nothing, which
+    // reads as a dead button ("Trả lời & gỡ chặn" did exactly that). Confirmations are drawn in
+    // the page instead, so the UI must not call the native ones at all.
+    const problems: string[] = []
+    const { readdirSync, readFileSync: read, statSync } = await import('node:fs')
+    const { join: pjoin } = await import('node:path')
+    const walk = (dir: string): string[] =>
+      readdirSync(dir).flatMap((n) => {
+        const p = pjoin(dir, n)
+        return statSync(p).isDirectory() ? walk(p) : /\.(tsx?|jsx?)$/.test(n) ? [p] : []
+      })
+    const DIALOG = /(^|[^\w.$])(?:window\.)?(confirm|alert|prompt)\s*\(/
+    for (const file of walk('src')) {
+      read(file, 'utf8').split('\n').forEach((line, i) => {
+        const code = line.replace(/\/\/.*$/, '').replace(/^\s*\*.*$/, '')
+        if (DIALOG.test(code)) problems.push(`${file}:${i + 1}: ${line.trim().slice(0, 80)}`)
+      })
+    }
+    check('no native browser dialogs in the UI (confirmations are drawn in the page)', problems.length === 0, problems.join(' | '))
+  }
+
   /* ------------------------------------------------------------- result -- */
   console.log(`\n${checks - failures}/${checks} checks passed\n`)
   if (failures) {

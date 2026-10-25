@@ -36,6 +36,27 @@ export default function AgentJourneyPanel() {
   return <Journey key={name} name={name} />
 }
 
+/**
+ * Confirmation INSIDE the panel. The browser's own `window.confirm` is not available everywhere
+ * the office runs (the embedded browser pane refuses it and answers "no" at once), and a click
+ * that is silently cancelled looks exactly like a button that does nothing.
+ */
+function InlineConfirm({ text, yes, busy, onYes, onNo }: { text: string; yes: string; busy: boolean; onYes: () => void; onNo: () => void }) {
+  return (
+    <div className="vp-j-confirm">
+      <p>{text}</p>
+      <div className="vp-j-actions">
+        <button className="vp-btn" disabled={busy} onClick={onYes}>
+          {busy ? '…' : yes}
+        </button>
+        <button className="vp-btn vp-btn-ghost" disabled={busy} onClick={onNo}>
+          {translate('Journey.cancel')}
+        </button>
+      </div>
+    </div>
+  )
+}
+
 function Reason({ text }: { text: string }) {
   const [open, setOpen] = useState(false)
   const long = text.length > REASON_SHORT
@@ -74,6 +95,8 @@ function Journey({ name }: { name: string }) {
   const [assignText, setAssignText] = useState('')
   const [assignBoard, setAssignBoard] = useState('')
   const [confirming, setConfirming] = useState(false)
+  /** The card a confirmation is open on, and what it would do. */
+  const [ask, setAsk] = useState<{ kind: 'archive' | 'free'; id: string } | null>(null)
 
   // What is already known shows at once (the roster reads it ahead); this only brings it up to date.
   const reload = useCallback(async () => {
@@ -114,18 +137,23 @@ function Journey({ name }: { name: string }) {
     try {
       setNote(await fn())
     } catch (e) {
-      setNote(translate('Journey.error', { msg: (e as Error).message }))
+      // A failed WRITE must not read like a failed read ("Không đọc được").
+      setNote(translate('Journey.actionFailed', { msg: (e as Error).message }))
     } finally {
       setBusy(null)
     }
     await refreshAll()
   }
 
-  const answer = (c: BriefCard) =>
-    run(`ans:${c.id}`, async () => {
-      const text = (drafts[c.id] ?? '').trim()
-      if (!text) return null
-      if (!window.confirm(translate('Journey.answerConfirm', { title: c.title }))) return null
+  const answer = (c: BriefCard) => {
+    const text = (drafts[c.id] ?? '').trim()
+    if (!text) {
+      // Never a silent no-op: say what is missing and put the cursor there.
+      setNote(translate('Journey.answerNeeded'))
+      document.getElementById(`vp-ans-${c.id}`)?.focus()
+      return Promise.resolve()
+    }
+    return run(`ans:${c.id}`, async () => {
       const said = await post(taskUrl(c), { action: 'steer', message: text })
       if (!said.ok) throw new Error(said.error ?? 'steer')
       const freed = await post(taskUrl(c), { action: 'promote', message: text.slice(0, 300) })
@@ -135,12 +163,24 @@ function Journey({ name }: { name: string }) {
       patchBrief(name, (b) => ({ ...b, cards: b.cards.map((x) => (x.id === c.id ? { ...x, status: 'ready', reason: undefined } : x)) }))
       return translate('Journey.answered')
     })
+  }
+
+  /** Unblock without an answer: the block was not a real question, the agent has what it needs. */
+  const unblockFree = (c: BriefCard) =>
+    run(`free:${c.id}`, async () => {
+      setAsk(null)
+      const freed = await post(taskUrl(c), { action: 'promote', message: translate('Journey.unblockedNote') })
+      if (!freed.ok) throw new Error(freed.error ?? 'promote')
+      patchBrief(name, (b) => ({ ...b, cards: b.cards.map((x) => (x.id === c.id ? { ...x, status: 'ready', reason: undefined } : x)) }))
+      return translate('Journey.unblockedFree')
+    })
 
   const archive = (c: BriefCard) =>
     run(`arc:${c.id}`, async () => {
-      if (!window.confirm(translate('Journey.archiveConfirm', { title: c.title }))) return null
+      setAsk(null)
       const res = await post(`/api/hermes/tasks/archive?board=${encodeURIComponent(c.board)}`, { action: 'archive', ids: [c.id] })
-      if (!res.ok) throw new Error(res.error ?? 'archive')
+      // 409 = Hermes refused this id (running, or no longer there): the route says so per id.
+      if (!res.ok) throw new Error(res.status === 409 ? translate('Journey.archiveRefused') : (res.error ?? 'archive'))
       patchBrief(name, (b) => ({ ...b, cards: b.cards.filter((x) => x.id !== c.id) }))
       return translate('Journey.archived')
     })
@@ -297,6 +337,7 @@ function Journey({ name }: { name: string }) {
                   {c.kind !== 'dependency' && (
                     <>
                       <textarea
+                        id={`vp-ans-${c.id}`}
                         className="vp-input"
                         rows={3}
                         value={drafts[c.id] ?? ''}
@@ -304,26 +345,48 @@ function Journey({ name }: { name: string }) {
                         aria-label={translate('Journey.answerLabel', { name })}
                         onChange={(e) => setDraft(c.id, e.target.value)}
                       />
+                      {ask?.kind === 'free' && ask.id === c.id ? (
+                        <InlineConfirm
+                          text={translate('Journey.unblockFreeConfirm', { title: c.title })}
+                          yes={translate('Journey.unblockYes')}
+                          busy={busy === `free:${c.id}`}
+                          onYes={() => void unblockFree(c)}
+                          onNo={() => setAsk(null)}
+                        />
+                      ) : (
+                        <div className="vp-j-actions">
+                          <button className="vp-btn" disabled={busy !== null} onClick={() => void answer(c)}>
+                            {busy === `ans:${c.id}` ? '…' : translate('Journey.answerSend')}
+                          </button>
+                          <button className="vp-btn vp-btn-ghost" onClick={() => openCard(c)}>
+                            {translate('Journey.openCard')}
+                          </button>
+                          <button type="button" className="vp-j-link" disabled={busy !== null} onClick={() => setAsk({ kind: 'free', id: c.id })}>
+                            {translate('Journey.unblockFree')}
+                          </button>
+                        </div>
+                      )}
+                    </>
+                  )}
+                  {c.kind === 'dependency' &&
+                    (ask?.kind === 'archive' && ask.id === c.id ? (
+                      <InlineConfirm
+                        text={translate('Journey.archiveConfirm', { title: c.title })}
+                        yes={translate('Journey.archiveYes')}
+                        busy={busy === `arc:${c.id}`}
+                        onYes={() => void archive(c)}
+                        onNo={() => setAsk(null)}
+                      />
+                    ) : (
                       <div className="vp-j-actions">
-                        <button className="vp-btn" disabled={busy !== null || !(drafts[c.id] ?? '').trim()} onClick={() => void answer(c)}>
-                          {busy === `ans:${c.id}` ? '…' : translate('Journey.answerSend')}
+                        <button className="vp-btn" disabled={busy !== null} onClick={() => setAsk({ kind: 'archive', id: c.id })}>
+                          {translate('Journey.archive')}
                         </button>
                         <button className="vp-btn vp-btn-ghost" onClick={() => openCard(c)}>
                           {translate('Journey.openCard')}
                         </button>
                       </div>
-                    </>
-                  )}
-                  {c.kind === 'dependency' && (
-                    <div className="vp-j-actions">
-                      <button className="vp-btn" disabled={busy !== null} onClick={() => void archive(c)}>
-                        {busy === `arc:${c.id}` ? '…' : translate('Journey.archive')}
-                      </button>
-                      <button className="vp-btn vp-btn-ghost" onClick={() => openCard(c)}>
-                        {translate('Journey.openCard')}
-                      </button>
-                    </div>
-                  )}
+                    ))}
                 </details>
               ))}
             </section>
